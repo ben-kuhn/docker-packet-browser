@@ -229,10 +229,13 @@ services:
 
 **BPQ Configuration (bpq32.cfg):**
 ```
-PORT
- ...
- APPLICATION 1,WEB,C 3 HOST 0 S CONTAINERIP 63004
+CMDPORT 63004
+
+APPLICATION 4,WEB,C 1 HOST 0 S
 ```
+
+- `CMDPORT 63004` - Defines HOST 0 as the container's port
+- `APPLICATION 4,WEB,C 1 HOST 0 S` - Maps "WEB" command to HOST 0, returns to node menu on disconnect
 
 **Connection flow:**
 1. User connects to BPQ node
