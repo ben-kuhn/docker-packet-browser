@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+
+# Nix build result symlink
+/result
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Logs (local testing)
+*.log
+
+# Environment files
+.env
+.env.local

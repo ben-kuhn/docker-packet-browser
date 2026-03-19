@@ -1,5 +1,7 @@
 # Packet Browser
 
+[![Build and Publish](https://github.com/ben-kuhn/docker-packet-browser/actions/workflows/build.yml/badge.svg)](https://github.com/ben-kuhn/docker-packet-browser/actions/workflows/build.yml)
+
 A secure web browser for packet radio users connecting through BPQ. This containerized implementation provides text-based web browsing with comprehensive logging, content filtering, and security hardening suitable for amateur radio networks.
 
 ## Overview
@@ -44,7 +46,7 @@ Prerequisites: Nix with flakes enabled
 
 ```bash
 # Clone repository
-git clone https://github.com/[owner]/docker-packet-browser.git
+git clone https://github.com/ben-kuhn/docker-packet-browser.git
 cd docker-packet-browser
 
 # Build Docker image with Nix
@@ -68,7 +70,7 @@ version: '3.8'
 
 services:
   packet-browser:
-    image: ghcr.io/[owner]/packet-browser:latest
+    image: ghcr.io/ben-kuhn/packet-browser:latest
     # Or use: packet-browser:latest (if built locally)
 
     ports:
@@ -256,7 +258,7 @@ mkdir -p ~/.config/nix
 echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
 
 # Clone repository
-git clone https://github.com/[owner]/docker-packet-browser.git
+git clone https://github.com/ben-kuhn/docker-packet-browser.git
 cd docker-packet-browser
 
 # Build the Docker image
@@ -444,7 +446,7 @@ environment:
 GNU General Public License v3 or later
 
 Original browse.sh: Copyright 2019-2023 Red Tuby PE1RRR
-Docker implementation: Copyright 2026 [Your Name/Callsign]
+Docker implementation: Copyright 2026 KU0HN
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
@@ -455,10 +457,10 @@ You should have received a copy of the GNU General Public License along with thi
 ## Credits
 
 - **Red Tuby PE1RRR** - Original browse.sh implementation (2019-2023)
-- **[Your Callsign]** - Docker containerization and Rust port (2026)
+- **KU0HN** - Docker containerization and Rust port (2026)
 
 ## Support
 
-Issues and pull requests: https://github.com/[owner]/docker-packet-browser
+Issues and pull requests: https://github.com/ben-kuhn/docker-packet-browser
 
 For BPQ-specific questions, consult the BPQ32 documentation.
