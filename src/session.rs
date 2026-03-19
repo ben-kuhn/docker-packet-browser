@@ -1,5 +1,6 @@
 use regex::Regex;
 use thiserror::Error;
+use std::time::Instant;
 
 #[derive(Error, Debug)]
 pub enum SessionError {
@@ -7,6 +8,47 @@ pub enum SessionError {
     InvalidCallsign,
     #[error("Acknowledgment required")]
     AcknowledgmentRequired,
+}
+
+pub struct Session {
+    pub callsign: String,
+    pub acknowledged: bool,
+    pub current_url: Option<String>,
+    pub previous_url: Option<String>,
+    pub links: Vec<(usize, String)>,  // NOTE: tuple of (index, url)
+    pub page_content: Vec<String>,
+    pub lines_per_page: usize,
+    pub full_page_mode: bool,
+    pub last_activity: Instant,
+}
+
+impl Session {
+    pub fn new(callsign: String) -> Self {
+        Self {
+            callsign,
+            acknowledged: false,
+            current_url: None,
+            previous_url: None,
+            links: Vec::new(),
+            page_content: Vec::new(),
+            lines_per_page: 15,
+            full_page_mode: false,
+            last_activity: Instant::now(),
+        }
+    }
+
+    pub fn acknowledge(&mut self) {
+        self.acknowledged = true;
+        self.touch();
+    }
+
+    pub fn touch(&mut self) {
+        self.last_activity = Instant::now();
+    }
+
+    pub fn is_timed_out(&self, timeout_minutes: u64) -> bool {
+        self.last_activity.elapsed().as_secs() > timeout_minutes * 60
+    }
 }
 
 pub fn validate_callsign(callsign: &str) -> Result<String, SessionError> {
