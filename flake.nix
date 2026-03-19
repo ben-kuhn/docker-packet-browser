@@ -21,8 +21,15 @@
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          nativeBuildInputs = [ pkgs.pkg-config ];
+          nativeBuildInputs = [
+            pkgs.pkg-config
+            pkgs.rustfmt  # Required by headless_chrome build
+          ];
           buildInputs = [ pkgs.openssl ];
+
+          # Skip tests in Nix build - they require single-threaded execution
+          # due to env var manipulation. Tests are run separately in CI.
+          doCheck = false;
         };
 
         dockerImage = pkgs.dockerTools.buildImage {
