@@ -28,7 +28,7 @@ Package the PE1RRR packet radio browser into a secure, portable NixOS-based Dock
 **Base Image:** NixOS minimal
 
 **Components installed via Nix:**
-- `lynx` - HTML to text conversion
+- `chromium` - Headless browser for page rendering
 - `dumb-init` or similar - minimal init process (PID 1)
 - `logrotate` - log rotation (optional feature)
 - `packet-browser` - Rust binary (port of browse.sh logic)
@@ -41,8 +41,9 @@ Package the PE1RRR packet radio browser into a secure, portable NixOS-based Dock
 
 **Rust binary (`packet-browser`):**
 - Statically compiled, single binary
-- Ports all browse.sh functionality
-- Invokes Lynx for HTML-to-text conversion
+- Launches headless Chromium to render pages
+- Extracts text content from rendered DOM
+- Parses and numbers hyperlinks
 - Handles user input, pagination, link navigation
 - Manages logging, filtering, timeout
 
@@ -250,9 +251,9 @@ PORT
 ## 7. Error Handling
 
 **URL request errors:**
-- Let Lynx display errors natively
-- No interception or custom handling
-- User sees what Lynx shows
+- Chromium renders error pages natively
+- Extract and display error text to user
+- No custom error interception
 
 **Session errors:**
 - Invalid callsign: "Invalid callsign format. Disconnecting."
@@ -313,20 +314,11 @@ docker load < result
 - Numbered links for navigation (e.g., `[1]`, `[2]`)
 - No ASCII art or image rendering
 
-## Text Browser
+## Rendering Engine
 
-Lynx is retained for HTML-to-text conversion:
-- Proven in this application
-- Lightweight
-- Clean text output without ASCII art
-- Compatible with existing numbered-link navigation paradigm
-
----
-
-## Future Enhancements
-
-**Headless browser rendering:**
-- Add optional headless Chrome/Firefox backend for JavaScript-heavy sites
-- Render page fully, then extract text for display
-- Would improve compatibility with modern web applications
-- Trade-off: heavier container, increased attack surface
+Headless Chromium for page rendering:
+- Full JavaScript support for modern sites
+- Renders page completely, then extracts text
+- Rust binary extracts text content from DOM
+- Links parsed and numbered for navigation
+- Compatible with existing command-based navigation paradigm
