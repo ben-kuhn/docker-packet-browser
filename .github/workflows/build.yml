@@ -21,9 +21,11 @@ jobs:
         uses: cachix/install-nix-action@v24
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
       - name: Run tests
-        run: nix develop -c cargo test --all-features
+        run: nix develop -c cargo test --all-features -- --test-threads=1
 
   build:
     needs: test
@@ -39,6 +41,8 @@ jobs:
         uses: cachix/install-nix-action@v24
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
       - name: Build Docker image
         run: nix build .#docker-image
