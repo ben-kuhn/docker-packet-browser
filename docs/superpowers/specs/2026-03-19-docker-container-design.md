@@ -188,6 +188,7 @@ All configuration via environment variables:
 | `SYSLOG_HOST` | *(empty)* | Optional syslog server |
 | `SYSLOG_PORT` | `514` | Syslog port |
 | `LINES_PER_PAGE` | `15` | Default pagination |
+| `DEBUG_MODE` | `false` | Enable debug mode for testing without BPQ |
 
 **Volume mounts:**
 
@@ -245,6 +246,12 @@ PORT
 - BPQ passes callsign at connection start
 - Container validates callsign format before proceeding
 - Invalid callsign = session rejected with error
+
+**Debug mode (`DEBUG_MODE=true`):**
+- For testing via raw telnet without BPQ
+- Prompts user to enter callsign manually
+- Callsign still validated
+- All other functionality identical (logging, filtering, etc.)
 
 ---
 
