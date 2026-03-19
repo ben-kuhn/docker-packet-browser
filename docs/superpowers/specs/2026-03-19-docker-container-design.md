@@ -20,7 +20,6 @@ Package the PE1RRR packet radio browser into a secure, portable NixOS-based Dock
 
 - Including BPQ inside this container
 - GUI or graphical rendering
-- Modern JavaScript-heavy site support
 
 ---
 
@@ -314,3 +313,13 @@ Lynx is retained for HTML-to-text conversion:
 - Lightweight
 - Clean text output without ASCII art
 - Compatible with existing numbered-link navigation paradigm
+
+---
+
+## Future Enhancements
+
+**Headless browser rendering:**
+- Add optional headless Chrome/Firefox backend for JavaScript-heavy sites
+- Render page fully, then extract text for display
+- Would improve compatibility with modern web applications
+- Trade-off: heavier container, increased attack surface
