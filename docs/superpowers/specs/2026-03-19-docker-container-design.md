@@ -31,13 +31,20 @@ Package the PE1RRR packet radio browser into a secure, portable NixOS-based Dock
 - `lynx` - HTML to text conversion
 - `dumb-init` or similar - minimal init process (PID 1)
 - `logrotate` - log rotation (optional feature)
-- Custom `browse.sh` script (enhanced from current)
+- `packet-browser` - Rust binary (port of browse.sh logic)
 
 **What's NOT included:**
 - No bash, sh, zsh, or any shell
 - No coreutils beyond absolute minimum
 - No package managers
 - No compilers or interpreters
+
+**Rust binary (`packet-browser`):**
+- Statically compiled, single binary
+- Ports all browse.sh functionality
+- Invokes Lynx for HTML-to-text conversion
+- Handles user input, pagination, link navigation
+- Manages logging, filtering, timeout
 
 **Startup flow:**
 1. Container starts with dumb-init as PID 1
@@ -275,7 +282,8 @@ PORT
 - `flake.nix` - Nix flake definition
 - `flake.lock` - Pinned dependencies
 - `docker-compose.yml` - Example deployment
-- `browse.sh` - Enhanced browser script
+- `src/` - Rust source code for packet-browser binary
+- `Cargo.toml` - Rust package manifest
 - `README.md` - Updated documentation
 - `.github/workflows/build.yml` - CI/CD pipeline
 
