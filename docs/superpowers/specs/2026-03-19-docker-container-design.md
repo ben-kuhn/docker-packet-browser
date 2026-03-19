@@ -29,7 +29,6 @@ Package the PE1RRR packet radio browser into a secure, portable NixOS-based Dock
 
 **Components installed via Nix:**
 - `lynx` - HTML to text conversion
-- `curl` - HTTP requests and HEAD checks
 - `dumb-init` or similar - minimal init process (PID 1)
 - `logrotate` - log rotation (optional feature)
 - Custom `browse.sh` script (enhanced from current)
