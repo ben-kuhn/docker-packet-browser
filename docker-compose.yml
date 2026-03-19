@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  packet-browser:
+    image: packet-browser:latest
+    # Or use: ghcr.io/ben-kuhn/packet-browser:latest
+
+    ports:
+      # Bind to loopback only by default (security)
+      - "127.0.0.1:63004:63004"
+
+    volumes:
+      # Logs - accessible from host
+      - ./logs:/var/log/packet-browser
+      # Hosts file for blocklist management
+      - ./hosts:/etc/hosts
+
+    environment:
+      # Service configuration
+      - LISTEN_PORT=63004
+      - PORTAL_URL=http://matrix.ehvairport.com/~bpq/
+      - IDLE_TIMEOUT_MINUTES=10
+      - LINES_PER_PAGE=15
+
+      # DNS filtering (OpenDNS Family Shield)
+      - DNS_SERVERS=208.67.222.123,208.67.220.123
+
+      # SSRF prevention - blocked IP ranges
+      # Remove ranges to allow access to local services
+      - BLOCKED_RANGES=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16
+
+      # Blocklist settings
+      - BLOCKLIST_ENABLED=true
+      - BLOCKLIST_REFRESH_HOURS=24
+      # - BLOCKLIST_URLS=https://example.com/blocklist.txt
+
+      # Logging
+      - LOG_ROTATE_ENABLED=true
+      - LOG_RETAIN_DAYS=30
+      - SYSLOG_ENABLED=false
+      # - SYSLOG_HOST=syslog.example.com
+      # - SYSLOG_PORT=514
+
+      # Debug mode - for testing without BPQ
+      - DEBUG_MODE=false
+
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW  # Required for DNS
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "63004"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+    restart: unless-stopped
