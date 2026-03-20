@@ -8,7 +8,7 @@ A secure web browser for packet radio users connecting through BPQ. This contain
 
 This project modernizes the original PE1RRR packet radio browser (browse.sh) into a secure, containerized deployment. The browser uses headless Chromium to render modern web pages and presents them as paginated text suitable for low-bandwidth packet radio connections.
 
-**Original Work:** Red Tuby PE1RRR (2019-2023) - browse.sh
+**Original Work:** Red Tuby PE1RRR (SK) - browse.sh
 **License:** GNU General Public License v3
 
 ### Key Features
