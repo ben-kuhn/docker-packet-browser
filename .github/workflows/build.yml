@@ -73,7 +73,7 @@ jobs:
       - name: Tag and push image
         if: github.event_name != 'pull_request'
         run: |
-          for tag in ${{ steps.meta.outputs.tags }}; do
-            docker tag packet-browser:latest $tag
-            docker push $tag
+          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r tag; do
+            docker tag packet-browser:latest "$tag"
+            docker push "$tag"
           done
