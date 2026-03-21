@@ -46,6 +46,8 @@ pub struct BrowserInstance {
 const CHROME_ARGS: &[&str] = &[
     "--headless",
     "--remote-debugging-port=0",   // Let Chrome pick a free port; outputs URL to stderr
+    "--user-data-dir=/tmp/chrome", // Required: Chrome derives crashpad database path from this;
+                                   // without it crashpad handler exits immediately crashing Chrome
     "--disable-dev-shm-usage",     // Docker limits /dev/shm to 64MB; forces Chrome to use /tmp
     "--disable-gpu",               // No GPU in container
     "--no-first-run",              // Skip first-run setup
@@ -54,6 +56,8 @@ const CHROME_ARGS: &[&str] = &[
     "--no-zygote",                 // Zygote process spawner requires fork capabilities unavailable under cap_drop: ALL
     "--disable-setuid-sandbox",
     "--no-sandbox",
+    "--disable-crash-reporter",
+    "--disable-breakpad",
 ];
 
 impl BrowserInstance {
@@ -62,6 +66,7 @@ impl BrowserInstance {
 
         let mut child = Command::new("/bin/chromium")
             .args(CHROME_ARGS)
+            .env("BREAKPAD_DUMP_LOCATION", "/tmp") // Prevents crashpad handler crash under cap_drop: ALL
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
