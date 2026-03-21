@@ -1,12 +1,10 @@
+use crate::browser::{InputField, InputKind};
+
 pub fn paginate(lines: &[String], lines_per_page: usize) -> Vec<Vec<String>> {
     if lines_per_page == 0 {
         return vec![lines.to_vec()];
     }
-
-    lines
-        .chunks(lines_per_page)
-        .map(|chunk| chunk.to_vec())
-        .collect()
+    lines.chunks(lines_per_page).map(|chunk| chunk.to_vec()).collect()
 }
 
 pub fn format_help(lines_per_page: usize) -> String {
@@ -20,7 +18,10 @@ will be prompted with the choice to continue or not.
 Commands:
 F - Toggle between Formatted Full Page and Paged
 H - This text
-I <n> <text> - Fill input field n with text and submit
+I <n> [value] - Interact with input field n:
+    Text/search: I 1 my search query  (fills and submits)
+    Select/radio: I 2 3               (picks option 3 and submits)
+    Checkbox: I 3                     (toggles and submits)
 L - List hyperlinks associated with the numbers
 N <url> - Open URL (e.g. N https://example.com)
 M - Main Menu
@@ -44,14 +45,38 @@ pub fn format_acknowledgment_prompt() -> &'static str {
     "All activity is logged including your callsign.\nType AGREE to proceed: "
 }
 
-pub fn format_page_footer(inputs: &[(usize, String)]) -> String {
-    let mut footer = String::from("--- H=Help N=URL S=Search P=Back M=Menu Q=Quit");
-    if !inputs.is_empty() {
-        footer.push_str(" | Inputs:");
-        for (idx, label) in inputs {
-            footer.push_str(&format!(" [I{} {}]", idx, label));
-        }
+pub fn format_inputs_section(inputs: &[InputField]) -> Vec<String> {
+    if inputs.is_empty() {
+        return vec![];
     }
-    footer.push_str(" ---");
-    footer
+
+    let mut lines = vec!["--- Inputs ---".to_string()];
+    for field in inputs {
+        let detail = match &field.kind {
+            InputKind::Text => "(text)".to_string(),
+            InputKind::Select { options } => {
+                let opts = options.iter().enumerate()
+                    .map(|(i, o)| format!("{}={}", i + 1, o))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("(select) {}", opts)
+            }
+            InputKind::Radio { options } => {
+                let opts = options.iter().enumerate()
+                    .map(|(i, o)| format!("{}={}", i + 1, o))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("(radio) {}", opts)
+            }
+            InputKind::Checkbox { checked } => {
+                format!("(checkbox) {}", if *checked { "ON" } else { "OFF" })
+            }
+        };
+        lines.push(format!("[I{}] {} {}", field.index, field.label, detail));
+    }
+    lines
+}
+
+pub fn format_page_footer() -> &'static str {
+    "--- H=Help N=URL S=Search I<n>=Input P=Back M=Menu Q=Quit ---"
 }

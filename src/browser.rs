@@ -12,15 +12,158 @@ pub enum BrowserError {
     ExtractionFailed(String),
 }
 
+#[derive(Debug, Clone)]
+pub enum InputKind {
+    Text,
+    Select { options: Vec<String> },
+    Radio { options: Vec<String> },
+    Checkbox { checked: bool },
+}
+
+#[derive(Debug, Clone)]
+pub struct InputField {
+    pub index: usize,
+    pub label: String,
+    pub kind: InputKind,
+}
+
 pub struct PageContent {
     pub text: Vec<String>,
-    pub links: Vec<(usize, String)>,   // (index, url)
-    pub inputs: Vec<(usize, String)>,  // (index, label/placeholder)
+    pub links: Vec<(usize, String)>,
+    pub inputs: Vec<InputField>,
 }
 
 pub struct BrowserInstance {
     browser: Browser,
 }
+
+// Canonical traversal: same selector + filter order used by both extract and interact.
+// __INDEX__ and __VALUE__ are replaced by the caller before evaluation.
+const JS_COLLECT: &str = r#"
+    (function collectSlots() {
+        var out = [];
+        var seenRadios = {};
+        var els = document.querySelectorAll('input, select, textarea');
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            if (el.disabled || el.offsetParent === null) continue;
+            var tag = el.tagName.toLowerCase();
+            var type = (el.getAttribute('type') ||
+                (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : 'text')
+            ).toLowerCase();
+            if (/^(hidden|submit|button|image|file|reset)$/.test(type)) continue;
+
+            function resolveLabel(e) {
+                var lbl = e.id ? document.querySelector('label[for="' + e.id + '"]') : null;
+                var text = (lbl && lbl.textContent.trim()) ||
+                           e.getAttribute('placeholder') || e.name ||
+                           e.getAttribute('aria-label') || '';
+                return text.trim().substring(0, 50);
+            }
+
+            if (type === 'radio') {
+                var name = el.name;
+                if (!name || seenRadios[name]) continue;
+                seenRadios[name] = 1;
+                var radios = document.querySelectorAll('input[type="radio"][name="' + name + '"]');
+                var opts = [];
+                for (var j = 0; j < radios.length; j++) {
+                    var r = radios[j];
+                    if (r.disabled || r.offsetParent === null) continue;
+                    var rl = resolveLabel(r);
+                    if (!rl && r.nextSibling && r.nextSibling.nodeType === 3) {
+                        rl = r.nextSibling.textContent.trim();
+                    }
+                    opts.push((rl || r.value).substring(0, 40));
+                }
+                out.push({kind: 'radio', label: resolveLabel(el) || name, options: opts});
+            } else if (tag === 'select') {
+                var sopts = [];
+                for (var k = 0; k < el.options.length; k++) {
+                    var ot = (el.options[k].text || el.options[k].value).trim();
+                    if (ot) sopts.push(ot);
+                }
+                out.push({kind: 'select', label: resolveLabel(el), options: sopts});
+            } else if (type === 'checkbox') {
+                out.push({kind: 'checkbox', label: resolveLabel(el), checked: el.checked});
+            } else {
+                out.push({kind: 'text', label: resolveLabel(el)});
+            }
+        }
+        return out;
+    })()
+"#;
+
+const JS_EXTRACT_INPUTS: &str = r#"JSON.stringify(__COLLECT__)"#;
+
+// Interact: re-traverses using same logic as collectSlots, acts on slot __INDEX__ (1-based).
+// __VALUE__ is a JSON-encoded string (already quoted).
+const JS_INTERACT: &str = r#"
+    (function() {
+        var seenRadios = {};
+        var counter = 0;
+        var targetIdx = __INDEX__ - 1;
+        var els = document.querySelectorAll('input, select, textarea');
+
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            if (el.disabled || el.offsetParent === null) continue;
+            var tag = el.tagName.toLowerCase();
+            var type = (el.getAttribute('type') ||
+                (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : 'text')
+            ).toLowerCase();
+            if (/^(hidden|submit|button|image|file|reset)$/.test(type)) continue;
+
+            var isRadioSlot = false;
+            if (type === 'radio') {
+                var name = el.name;
+                if (!name || seenRadios[name]) continue;
+                seenRadios[name] = 1;
+                isRadioSlot = true;
+            }
+
+            if (counter === targetIdx) {
+                var value = __VALUE__;
+
+                if (type === 'checkbox') {
+                    el.checked = !el.checked;
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                } else if (tag === 'select') {
+                    var optIdx = parseInt(value, 10) - 1;
+                    if (optIdx >= 0 && optIdx < el.options.length) {
+                        el.selectedIndex = optIdx;
+                        el.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                } else if (isRadioSlot) {
+                    var radioEls = Array.from(
+                        document.querySelectorAll('input[type="radio"][name="' + el.name + '"]')
+                    ).filter(function(r) { return !r.disabled && r.offsetParent !== null; });
+                    var rIdx = parseInt(value, 10) - 1;
+                    if (rIdx >= 0 && rIdx < radioEls.length) {
+                        radioEls[rIdx].checked = true;
+                        radioEls[rIdx].dispatchEvent(new Event('change', {bubbles: true}));
+                        el = radioEls[rIdx];
+                    }
+                } else {
+                    el.value = value;
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+
+                var form = el.form || (el.closest ? el.closest('form') : null);
+                if (form) {
+                    form.submit();
+                } else {
+                    el.dispatchEvent(new KeyboardEvent('keypress',
+                        {key: 'Enter', keyCode: 13, bubbles: true}));
+                }
+                return true;
+            }
+            counter++;
+        }
+        return false;
+    })()
+"#;
 
 impl BrowserInstance {
     pub fn new() -> Result<Self, BrowserError> {
@@ -49,7 +192,12 @@ impl BrowserInstance {
         extract_page_content(&tab)
     }
 
-    pub fn fill_and_submit(&self, url: &str, input_index: usize, value: &str) -> Result<PageContent, BrowserError> {
+    pub fn interact_with_input(
+        &self,
+        url: &str,
+        input_index: usize,
+        value: Option<&str>,
+    ) -> Result<PageContent, BrowserError> {
         let tab = self.browser.new_tab()
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
@@ -59,27 +207,12 @@ impl BrowserInstance {
         tab.wait_until_navigated()
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
 
-        let escaped = serde_json::to_string(value)
+        let value_json = serde_json::to_string(value.unwrap_or(""))
             .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
 
-        let js = format!(r#"
-            (function() {{
-                const inputs = Array.from(document.querySelectorAll(
-                    'input[type="text"], input[type="search"], input[type="email"], input[type="number"], input:not([type]), textarea'
-                )).filter(el => !el.disabled && el.offsetParent !== null);
-                const el = inputs[{}];
-                if (!el) return false;
-                el.value = {};
-                el.dispatchEvent(new Event('input', {{bubbles: true}}));
-                el.dispatchEvent(new Event('change', {{bubbles: true}}));
-                if (el.form) {{
-                    el.form.submit();
-                }} else {{
-                    el.dispatchEvent(new KeyboardEvent('keypress', {{key: 'Enter', keyCode: 13, bubbles: true}}));
-                }}
-                return true;
-            }})()
-        "#, input_index - 1, escaped);
+        let js = JS_INTERACT
+            .replace("__INDEX__", &input_index.to_string())
+            .replace("__VALUE__", &value_json);
 
         tab.evaluate(&js, false)
             .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
@@ -118,27 +251,38 @@ fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
         .map(|(i, url)| (i + 1, url))
         .collect();
 
-    // Input fields
-    let inputs_result = tab.evaluate(r#"
-        Array.from(document.querySelectorAll(
-            'input[type="text"], input[type="search"], input[type="email"], input[type="number"], input:not([type]), textarea'
-        ))
-        .filter(el => !el.disabled && el.offsetParent !== null)
-        .map((el, i) => {
-            const label = (document.querySelector(`label[for="${el.id}"]`) || {}).textContent
-                || el.placeholder || el.name || el.getAttribute('aria-label') || ('Field ' + (i + 1));
-            return label.trim().substring(0, 50);
-        })
-    "#, false).map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
+    // Inputs
+    let extract_js = JS_EXTRACT_INPUTS.replace("__COLLECT__", JS_COLLECT);
 
-    let inputs: Vec<(usize, String)> = inputs_result.value
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .enumerate()
-        .map(|(i, label)| (i + 1, label))
-        .collect();
+    let inputs_result = tab.evaluate(&extract_js, false)
+        .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
+
+    let inputs_json = inputs_result.value
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "[]".to_string());
+
+    let inputs = parse_input_fields(&inputs_json);
 
     Ok(PageContent { text: text_lines, links, inputs })
+}
+
+#[derive(serde::Deserialize)]
+struct RawInputField {
+    kind: String,
+    label: String,
+    options: Option<Vec<String>>,
+    checked: Option<bool>,
+}
+
+fn parse_input_fields(json: &str) -> Vec<InputField> {
+    let raw: Vec<RawInputField> = serde_json::from_str(json).unwrap_or_default();
+    raw.into_iter().enumerate().map(|(i, f)| {
+        let kind = match f.kind.as_str() {
+            "select"   => InputKind::Select { options: f.options.unwrap_or_default() },
+            "radio"    => InputKind::Radio  { options: f.options.unwrap_or_default() },
+            "checkbox" => InputKind::Checkbox { checked: f.checked.unwrap_or(false) },
+            _          => InputKind::Text,
+        };
+        InputField { index: i + 1, label: f.label, kind }
+    }).collect()
 }

@@ -228,7 +228,7 @@ Once connected and agreed to logging, the browser loads the portal page and show
 | `N <url>` | Open a URL (e.g. `N https://example.com`) — must include `https://` or `http://` |
 | `S <text>` | Search Wikipedia for text |
 | `<number>` | Follow a numbered link from the current page |
-| `I <n> <text>` | Fill input field n with text and submit the form (e.g. `I 1 hello world`) |
+| `I <n> [value]` | Interact with input field n. Value depends on type: text/search = type text; select/radio = pick option by number (e.g. `I 2 3` for option 3); checkbox = no value needed (toggles) |
 | `L` | List all links on the current page with their numbers |
 | `P` | Go back to the previous page |
 | `M` | Return to the portal menu page |
@@ -240,7 +240,15 @@ Once connected and agreed to logging, the browser loads the portal page and show
 
 > **Note:** URLs must include the full scheme (`https://` or `http://`). Typing just `google.com` will not work — use `N https://google.com`.
 
-Each page displays a footer banner listing available commands and any detected input fields (e.g. `[I1 Search]`). Use `I 1 <text>` to fill that field and submit.
+Each page displays an inputs section (if any fields exist) followed by a command footer. Example inputs section:
+```
+--- Inputs ---
+[I1] Search (text)
+[I2] Size (select) 1=Small 2=Medium 3=Large
+[I3] Newsletter (checkbox) OFF
+[I4] Color (radio) 1=Red 2=Blue 3=Green
+--- H=Help N=URL S=Search I<n>=Input P=Back M=Menu Q=Quit ---
+```
 
 ## Debug Mode / Testing
 

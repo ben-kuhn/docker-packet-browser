@@ -11,7 +11,7 @@ pub enum Command {
     LoadLink(usize),
     NewUrl(String),
     Search(String),
-    FillInput(usize, String),
+    FillInput(usize, Option<String>),
     Unknown(String),
 }
 
@@ -80,13 +80,17 @@ pub fn parse_command(input: &str) -> Command {
         return Command::Search(query);
     }
 
-    // Fill input field: i <num> <text>
+    // Fill/interact with input field: i <num> [value]
     if input.starts_with("i ") {
         let rest = input[2..].trim();
         if let Some(space) = rest.find(' ') {
             if let Ok(num) = rest[..space].parse::<usize>() {
-                return Command::FillInput(num, rest[space + 1..].trim().to_string());
+                return Command::FillInput(num, Some(rest[space + 1..].trim().to_string()));
             }
+        }
+        // No value — valid for checkbox toggle
+        if let Ok(num) = rest.parse::<usize>() {
+            return Command::FillInput(num, None);
         }
     }
 

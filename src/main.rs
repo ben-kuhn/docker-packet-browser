@@ -1,9 +1,9 @@
 use packet_browser::{
     blocklist::start_blocklist_manager,
-    browser::BrowserInstance,
+    browser::{BrowserInstance, InputKind},
     commands::{parse_command, Command},
     config::Config,
-    display::{format_acknowledgment_prompt, format_help, format_page_footer, format_welcome, paginate},
+    display::{format_acknowledgment_prompt, format_help, format_inputs_section, format_page_footer, format_welcome, paginate},
     filter::validate_url,
     logger::{LogEntry, LogStatus, Logger},
     session::{validate_callsign, Session},
@@ -209,21 +209,28 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                     writeln!(stream, "Error searching: {}", e)?;
                 }
             }
-            Command::FillInput(num, text) => {
+            Command::FillInput(num, value) => {
                 if let Some(url) = session.current_url.clone() {
-                    writeln!(stream, "Submitting...")?;
-                    stream.flush()?;
-                    match browser.fill_and_submit(&url, num, &text) {
-                        Ok(content) => {
-                            session.previous_url = Some(url);
-                            session.links = content.links;
-                            session.inputs = content.inputs;
-                            session.page_content = content.text;
-                            display_content(&mut session, &mut stream)?;
+                    if let Some(field) = session.inputs.iter().find(|f| f.index == num) {
+                        let needs_value = !matches!(field.kind, InputKind::Checkbox { .. });
+                        if needs_value && value.is_none() {
+                            writeln!(stream, "Input {} requires a value. Use: I {} <value>", num, num)?;
+                        } else {
+                            writeln!(stream, "Submitting...")?;
+                            stream.flush()?;
+                            match browser.interact_with_input(&url, num, value.as_deref()) {
+                                Ok(content) => {
+                                    session.previous_url = Some(url);
+                                    session.links = content.links;
+                                    session.inputs = content.inputs;
+                                    session.page_content = content.text;
+                                    display_content(&mut session, &mut stream)?;
+                                }
+                                Err(e) => writeln!(stream, "Failed: {}", e)?,
+                            }
                         }
-                        Err(e) => {
-                            writeln!(stream, "Failed to submit input: {}", e)?;
-                        }
+                    } else {
+                        writeln!(stream, "No input {} on this page.", num)?;
                     }
                 } else {
                     writeln!(stream, "No page loaded.")?;
@@ -333,7 +340,10 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
         }
     }
 
-    writeln!(stream, "\n{}", format_page_footer(&session.inputs))?;
+    for line in format_inputs_section(&session.inputs) {
+        writeln!(stream, "{}", line)?;
+    }
+    writeln!(stream, "{}", format_page_footer())?;
 
     Ok(())
 }
