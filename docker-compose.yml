@@ -18,7 +18,7 @@ services:
     environment:
       # Service configuration
       - LISTEN_PORT=63004
-      - PORTAL_URL=http://matrix.ehvairport.com/~bpq/
+      - PORTAL_URL=https://www.zeroretries.radio
       - IDLE_TIMEOUT_MINUTES=10
       - LINES_PER_PAGE=15
 

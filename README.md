@@ -89,7 +89,7 @@ services:
     environment:
       # Service configuration
       - LISTEN_PORT=63004
-      - PORTAL_URL=http://matrix.ehvairport.com/~bpq/
+      - PORTAL_URL=https://www.zeroretries.radio
       - IDLE_TIMEOUT_MINUTES=10
       - LINES_PER_PAGE=15
 
@@ -140,7 +140,7 @@ services:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LISTEN_PORT` | `63004` | TCP port the service listens on |
-| `PORTAL_URL` | `http://matrix.ehvairport.com/~bpq/` | Default home page shown on connect |
+| `PORTAL_URL` | `https://www.zeroretries.radio` | Default home page shown on connect |
 | `IDLE_TIMEOUT_MINUTES` | `10` | Session timeout for idle connections |
 | `LINES_PER_PAGE` | `15` | Number of lines per page in pagination |
 | `DNS_SERVERS` | `208.67.222.123,208.67.220.123` | DNS servers for filtering (OpenDNS Family Shield) |
