@@ -147,7 +147,7 @@ services:
 | `BLOCKED_RANGES` | `127.0.0.0/8,10.0.0.0/8,...` | CIDR ranges blocked for SSRF prevention |
 | `BLOCKLIST_ENABLED` | `true` | Enable/disable local hosts-based blocklist |
 | `BLOCKLIST_REFRESH_HOURS` | `24` | How often to refresh blocklists from URLs |
-| `BLOCKLIST_URLS` | *(defaults)* | Comma-separated URLs of blocklist sources |
+| `BLOCKLIST_URLS` | *(empty)* | Comma-separated URLs of hosts-format blocklists (`0.0.0.0 domain.com`) |
 | `LOG_ROTATE_ENABLED` | `true` | Enable automatic log rotation |
 | `LOG_RETAIN_DAYS` | `30` | Number of days to retain rotated logs |
 | `SYSLOG_ENABLED` | `false` | Forward logs to external syslog server |
@@ -365,10 +365,11 @@ Logs are sent to both local file and syslog when enabled.
 - Alternative: Cloudflare Family (1.1.1.3), Quad9 Family (9.9.9.11)
 
 **Layer 2: Hosts-based Blocklist**
-- Container fetches blocklists from URLs
-- Writes blocked domains to `/etc/hosts` (resolves to 127.0.0.2)
+- Container fetches hosts-format blocklists from URLs on startup
+- Blocklist URLs must use the hosts file format: `0.0.0.0 domain.com`
+- Writes blocked domains to `/etc/hosts` (resolves to 0.0.0.0)
 - Refreshes every 24 hours (configurable)
-- Admin can manually add blocks via hosts volume
+- Admin can manually add custom blocks via the hosts volume
 
 ### SSRF Prevention
 
@@ -427,9 +428,9 @@ Edit the hosts file volume to add custom blocks:
 # Edit hosts file
 nano hosts
 
-# Add custom blocks (will be preserved)
-127.0.0.2 unwanted-site.com
-127.0.0.2 another-blocked.com
+# Add custom blocks using hosts format (will be preserved on refresh)
+0.0.0.0 unwanted-site.com
+0.0.0.0 another-blocked.com
 
 # Restart container to apply
 docker compose restart
