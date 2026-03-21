@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Git pre-push hook — runs smoke test before allowing a push.
+# Install with: make install-hooks
+set -euo pipefail
+
+echo "=== Pre-push: running smoke test against packet-browser:latest ==="
+echo "    (run 'make build' first if you haven't built the image yet)"
+echo ""
+
+make smoke-test
