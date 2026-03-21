@@ -1,5 +1,6 @@
 use headless_chrome::{Browser, LaunchOptions, Tab};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -180,8 +181,11 @@ impl BrowserInstance {
     }
 
     pub fn fetch_page(&self, url: &str) -> Result<PageContent, BrowserError> {
+        eprintln!("[BROWSER] Fetching: {}", url);
         let tab = self.browser.new_tab()
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+
+        tab.set_default_timeout(Duration::from_secs(30));
 
         tab.navigate_to(url)
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
@@ -189,6 +193,7 @@ impl BrowserInstance {
         tab.wait_until_navigated()
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
 
+        eprintln!("[BROWSER] Page loaded: {}", url);
         extract_page_content(&tab)
     }
 
@@ -198,8 +203,11 @@ impl BrowserInstance {
         input_index: usize,
         value: Option<&str>,
     ) -> Result<PageContent, BrowserError> {
+        eprintln!("[BROWSER] Interacting with input {} on: {}", input_index, url);
         let tab = self.browser.new_tab()
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+
+        tab.set_default_timeout(Duration::from_secs(30));
 
         tab.navigate_to(url)
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;

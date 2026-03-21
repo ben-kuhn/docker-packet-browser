@@ -31,10 +31,12 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_string());
+                eprintln!("[CONNECT] New connection from {}", peer);
                 let config = Arc::clone(&config);
                 thread::spawn(move || {
                     if let Err(e) = handle_connection(stream, config) {
-                        eprintln!("Connection error: {}", e);
+                        eprintln!("[ERROR] Connection error from {}: {}", peer, e);
                     }
                 });
             }
@@ -66,10 +68,12 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
     let callsign = match validate_callsign(&callsign) {
         Ok(call) => call,
         Err(_) => {
+            eprintln!("[AUTH] Invalid callsign: {:?}", callsign);
             writeln!(stream, "Invalid callsign format.")?;
             return Ok(());
         }
     };
+    eprintln!("[AUTH] Callsign validated: {}", callsign);
 
     // Create session
     let mut session = Session::new(callsign.clone());
@@ -86,6 +90,7 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
         return Ok(());
     }
 
+    eprintln!("[AUTH] {} agreed to terms", callsign);
     session.acknowledge();
 
     // Log agreement
@@ -102,16 +107,20 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
     writeln!(stream, "\n{}\n", format_welcome(&callsign, VERSION))?;
 
     // Initialize browser
+    eprintln!("[BROWSER] Initializing for {}", callsign);
     let browser = match BrowserInstance::new() {
-        Ok(b) => b,
+        Ok(b) => { eprintln!("[BROWSER] Ready for {}", callsign); b }
         Err(e) => {
+            eprintln!("[BROWSER] Failed to initialize: {}", e);
             writeln!(stream, "Failed to initialize browser: {}", e)?;
             return Ok(());
         }
     };
 
     // Load portal page
+    eprintln!("[PORTAL] Loading {} for {}", config.portal_url, callsign);
     if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &config.portal_url) {
+        eprintln!("[PORTAL] Failed for {}: {}", callsign, e);
         writeln!(stream, "Failed to load portal: {}", e)?;
     }
 
@@ -133,10 +142,14 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
 
         session.touch();
 
+        let trimmed = input.trim();
+        eprintln!("[CMD] {} sent: {:?}", callsign, trimmed);
+
         let command = parse_command(&input);
 
         match command {
             Command::Quit => {
+                eprintln!("[CMD] {} disconnected", callsign);
                 writeln!(stream, "Goodbye!")?;
                 break;
             }
@@ -237,11 +250,13 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                 }
             }
             Command::Unknown(cmd) => {
+                eprintln!("[CMD] {} unknown command: {:?}", callsign, cmd);
                 writeln!(stream, "Unknown command: '{}'. Type H for help.", cmd)?;
             }
         }
     }
 
+    eprintln!("[CONNECT] Session ended for {}", callsign);
     Ok(())
 }
 
