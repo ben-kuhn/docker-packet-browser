@@ -7,4 +7,4 @@ echo "=== Pre-push: running smoke test against packet-browser:latest ==="
 echo "    (run 'make build' first if you haven't built the image yet)"
 echo ""
 
-make smoke-test
+nix --extra-experimental-features "nix-command flakes" develop -c make smoke-test
