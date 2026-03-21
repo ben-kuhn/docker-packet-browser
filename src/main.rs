@@ -108,7 +108,7 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
 
     // Initialize browser
     eprintln!("[BROWSER] Initializing for {}", callsign);
-    let browser = match BrowserInstance::new() {
+    let browser = match BrowserInstance::new(&callsign) {
         Ok(b) => { eprintln!("[BROWSER] Ready for {}", callsign); b }
         Err(e) => {
             eprintln!("[BROWSER] Failed to initialize: {}", e);

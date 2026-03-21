@@ -46,8 +46,7 @@ pub struct BrowserInstance {
 const CHROME_ARGS: &[&str] = &[
     "--headless",
     "--remote-debugging-port=0",   // Let Chrome pick a free port; outputs URL to stderr
-    "--user-data-dir=/tmp/chrome", // Required: Chrome derives crashpad database path from this;
-                                   // without it crashpad handler exits immediately crashing Chrome
+    // --user-data-dir is set dynamically per session (scoped to callsign)
     "--disable-dev-shm-usage",     // Docker limits /dev/shm to 64MB; forces Chrome to use /tmp
     "--disable-gpu",               // No GPU in container
     "--no-first-run",              // Skip first-run setup
@@ -61,12 +60,19 @@ const CHROME_ARGS: &[&str] = &[
 ];
 
 impl BrowserInstance {
-    pub fn new() -> Result<Self, BrowserError> {
+    pub fn new(callsign: &str) -> Result<Self, BrowserError> {
+        // Sanitize callsign for use in filesystem paths (alphanumeric only)
+        let safe_id: String = callsign.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        let session_dir = format!("/tmp/chrome-{}", safe_id);
+
         eprintln!("[BROWSER] Launching Chrome at /bin/chromium");
 
         let mut child = Command::new("/bin/chromium")
             .args(CHROME_ARGS)
-            .env("BREAKPAD_DUMP_LOCATION", "/tmp") // Prevents crashpad handler crash under cap_drop: ALL
+            .arg(format!("--user-data-dir={}", session_dir))
+            .env("BREAKPAD_DUMP_LOCATION", &session_dir) // Scoped per-session: prevents crashpad crash and isolates dumps
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
