@@ -29,8 +29,9 @@ This project modernizes the original PE1RRR packet radio browser (browse.sh) int
 Pull from GitHub Container Registry and run with Docker Compose:
 
 ```bash
-# Create directory structure
-mkdir -p packet-browser/{logs,hosts}
+# Create directory and required files
+mkdir -p packet-browser/logs
+touch packet-browser/hosts
 
 # Create docker-compose.yml (see Configuration section below)
 nano docker-compose.yml
@@ -81,6 +82,8 @@ services:
       # Logs - accessible from host
       - ./logs:/var/log/packet-browser
       # Hosts file for blocklist management
+      # Note: ./hosts must exist as a file (not directory) before starting
+      # Create it with: touch hosts
       - ./hosts:/etc/hosts
 
     environment:
@@ -115,7 +118,7 @@ services:
     # Security hardening
     read_only: true
     tmpfs:
-      - /tmp:size=64M
+      - /tmp:size=64M,mode=1777
 
     cap_drop:
       - ALL

@@ -24,7 +24,7 @@ impl BrowserInstance {
     pub fn new() -> Result<Self, BrowserError> {
         let launch_options = LaunchOptions::default_builder()
             .headless(true)
-            .sandbox(true)
+            .sandbox(false) // Sandbox requires kernel user namespaces; disabled for container security model
             .build()
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
