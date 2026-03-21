@@ -21,7 +21,7 @@ Commands:
 F - Toggle between Formatted Full Page and Paged
 H - This text
 L - List hyperlinks associated with the numbers
-N <url> - Open <url>
+N <url> - Open URL (e.g. N https://example.com)
 M - Main Menu
 OP <1-99> - Set Lines Per Page. OP<enter> shows.
 P - Previous page (back)
@@ -34,7 +34,7 @@ Q/B - Quit/Bye"#,
 
 pub fn format_welcome(callsign: &str, version: &str) -> String {
     format!(
-        "Hi {}, WWW V{}\nPage navigation numbers are highlighted with [ ]",
+        "Hi {}, WWW V{}\nPage navigation numbers are highlighted with [ ]\nType H for help. N <url> to open a URL. S <text> to search.",
         callsign, version
     )
 }

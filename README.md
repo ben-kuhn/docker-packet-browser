@@ -219,6 +219,26 @@ services:
 6. User browses web via numbered link navigation
 7. On exit or timeout, user returns to BPQ node menu
 
+## User Commands
+
+Once connected and agreed to logging, the browser loads the portal page and shows a `Command:` prompt. Type `H` at any time for in-session help.
+
+| Command | Description |
+|---------|-------------|
+| `N <url>` | Open a URL (e.g. `N https://example.com`) — must include `https://` or `http://` |
+| `S <text>` | Search Wikipedia for text |
+| `<number>` | Follow a numbered link from the current page |
+| `L` | List all links on the current page with their numbers |
+| `P` | Go back to the previous page |
+| `M` | Return to the portal menu page |
+| `R` | Redisplay the current page |
+| `F` | Toggle between paged and full-page display |
+| `OP <n>` | Set lines per page (1-99); `OP` alone shows current setting |
+| `H` or `?` | Show help |
+| `Q` or `B` | Quit / disconnect |
+
+> **Note:** URLs must include the full scheme (`https://` or `http://`). Typing just `google.com` will not work — use `N https://google.com`.
+
 ## Debug Mode / Testing
 
 To test the browser without BPQ, enable debug mode:
