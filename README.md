@@ -403,7 +403,7 @@ Only `http://` and `https://` are permitted.
 - **No shell binaries** - No escape path for users
 - **Capability dropping** - All capabilities dropped except NET_RAW (for DNS)
 - **Non-root user** - Runs as UID 1000
-- **tmpfs for /tmp** - Size-limited RAM disk (64MB)
+- **tmpfs for /tmp** - Size-limited RAM disk (64MB, mode=1777 for non-root write access)
 - **Network isolation** - Loopback binding by default
 
 ### Session Security
