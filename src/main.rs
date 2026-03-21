@@ -1,4 +1,5 @@
 use packet_browser::{
+    blocklist::start_blocklist_manager,
     browser::BrowserInstance,
     commands::{parse_command, Command},
     config::Config,
@@ -19,6 +20,10 @@ fn main() {
 
     println!("Starting packet-browser v{}", VERSION);
     println!("Listening on port {}", config.listen_port);
+
+    if config.blocklist_enabled && !config.blocklist_urls.is_empty() {
+        start_blocklist_manager(config.blocklist_urls.clone(), config.blocklist_refresh_hours);
+    }
 
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.listen_port))
         .expect("Failed to bind to port");

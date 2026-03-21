@@ -103,7 +103,7 @@ services:
       # Blocklist settings
       - BLOCKLIST_ENABLED=true
       - BLOCKLIST_REFRESH_HOURS=24
-      # - BLOCKLIST_URLS=https://example.com/blocklist.txt
+      - BLOCKLIST_URLS=https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/hosts/ultimate.txt
 
       # Logging
       - LOG_ROTATE_ENABLED=true
