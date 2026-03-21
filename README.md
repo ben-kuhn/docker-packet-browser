@@ -228,6 +228,7 @@ Once connected and agreed to logging, the browser loads the portal page and show
 | `N <url>` | Open a URL (e.g. `N https://example.com`) — must include `https://` or `http://` |
 | `S <text>` | Search Wikipedia for text |
 | `<number>` | Follow a numbered link from the current page |
+| `I <n> <text>` | Fill input field n with text and submit the form (e.g. `I 1 hello world`) |
 | `L` | List all links on the current page with their numbers |
 | `P` | Go back to the previous page |
 | `M` | Return to the portal menu page |
@@ -238,6 +239,8 @@ Once connected and agreed to logging, the browser loads the portal page and show
 | `Q` or `B` | Quit / disconnect |
 
 > **Note:** URLs must include the full scheme (`https://` or `http://`). Typing just `google.com` will not work — use `N https://google.com`.
+
+Each page displays a footer banner listing available commands and any detected input fields (e.g. `[I1 Search]`). Use `I 1 <text>` to fill that field and submit.
 
 ## Debug Mode / Testing
 

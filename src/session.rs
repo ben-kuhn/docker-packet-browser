@@ -15,7 +15,8 @@ pub struct Session {
     pub acknowledged: bool,
     pub current_url: Option<String>,
     pub previous_url: Option<String>,
-    pub links: Vec<(usize, String)>,  // NOTE: tuple of (index, url)
+    pub links: Vec<(usize, String)>,   // (index, url)
+    pub inputs: Vec<(usize, String)>,  // (index, label)
     pub page_content: Vec<String>,
     pub lines_per_page: usize,
     pub full_page_mode: bool,
@@ -30,6 +31,7 @@ impl Session {
             current_url: None,
             previous_url: None,
             links: Vec::new(),
+            inputs: Vec::new(),
             page_content: Vec::new(),
             lines_per_page: 15,
             full_page_mode: false,

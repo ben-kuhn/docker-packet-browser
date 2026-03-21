@@ -3,7 +3,7 @@ use packet_browser::{
     browser::BrowserInstance,
     commands::{parse_command, Command},
     config::Config,
-    display::{format_acknowledgment_prompt, format_help, format_welcome, paginate},
+    display::{format_acknowledgment_prompt, format_help, format_page_footer, format_welcome, paginate},
     filter::validate_url,
     logger::{LogEntry, LogStatus, Logger},
     session::{validate_callsign, Session},
@@ -209,6 +209,26 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                     writeln!(stream, "Error searching: {}", e)?;
                 }
             }
+            Command::FillInput(num, text) => {
+                if let Some(url) = session.current_url.clone() {
+                    writeln!(stream, "Submitting...")?;
+                    stream.flush()?;
+                    match browser.fill_and_submit(&url, num, &text) {
+                        Ok(content) => {
+                            session.previous_url = Some(url);
+                            session.links = content.links;
+                            session.inputs = content.inputs;
+                            session.page_content = content.text;
+                            display_content(&mut session, &mut stream)?;
+                        }
+                        Err(e) => {
+                            writeln!(stream, "Failed to submit input: {}", e)?;
+                        }
+                    }
+                } else {
+                    writeln!(stream, "No page loaded.")?;
+                }
+            }
             Command::Unknown(cmd) => {
                 writeln!(stream, "Unknown command: '{}'. Type H for help.", cmd)?;
             }
@@ -271,6 +291,7 @@ fn load_page(
     session.previous_url = session.current_url.clone();
     session.current_url = Some(url.to_string());
     session.links = page_content.links;
+    session.inputs = page_content.inputs;
     session.page_content = page_content.text;
 
     // Display content
@@ -286,12 +307,10 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
     }
 
     if session.full_page_mode {
-        // Display all content at once
         for line in &session.page_content {
             writeln!(stream, "{}", line)?;
         }
     } else {
-        // Paginated display
         let pages = paginate(&session.page_content, session.lines_per_page);
 
         for (page_num, page) in pages.iter().enumerate() {
@@ -299,7 +318,6 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
                 writeln!(stream, "{}", line)?;
             }
 
-            // Prompt to continue if not last page
             if page_num < pages.len() - 1 {
                 write!(stream, "\nPress ENTER to continue, or Q to stop: ")?;
                 stream.flush()?;
@@ -314,6 +332,8 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
             }
         }
     }
+
+    writeln!(stream, "\n{}", format_page_footer(&session.inputs))?;
 
     Ok(())
 }

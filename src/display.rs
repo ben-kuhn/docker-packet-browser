@@ -20,6 +20,7 @@ will be prompted with the choice to continue or not.
 Commands:
 F - Toggle between Formatted Full Page and Paged
 H - This text
+I <n> <text> - Fill input field n with text and submit
 L - List hyperlinks associated with the numbers
 N <url> - Open URL (e.g. N https://example.com)
 M - Main Menu
@@ -41,4 +42,16 @@ pub fn format_welcome(callsign: &str, version: &str) -> String {
 
 pub fn format_acknowledgment_prompt() -> &'static str {
     "All activity is logged including your callsign.\nType AGREE to proceed: "
+}
+
+pub fn format_page_footer(inputs: &[(usize, String)]) -> String {
+    let mut footer = String::from("--- H=Help N=URL S=Search P=Back M=Menu Q=Quit");
+    if !inputs.is_empty() {
+        footer.push_str(" | Inputs:");
+        for (idx, label) in inputs {
+            footer.push_str(&format!(" [I{} {}]", idx, label));
+        }
+    }
+    footer.push_str(" ---");
+    footer
 }
