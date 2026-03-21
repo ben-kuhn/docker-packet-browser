@@ -178,11 +178,14 @@ impl BrowserInstance {
         //   that block startup.
         // --disable-extensions: No user extensions in a server context.
         let args = vec![
-            OsStr::new("--disable-dev-shm-usage"),
-            OsStr::new("--disable-gpu"),
-            OsStr::new("--no-first-run"),
+            OsStr::new("--disable-dev-shm-usage"),   // Use /tmp instead of /dev/shm (Docker limits shm to 64MB)
+            OsStr::new("--disable-gpu"),             // No GPU in container
+            OsStr::new("--no-first-run"),            // Skip first-run setup dialogs
             OsStr::new("--no-default-browser-check"),
             OsStr::new("--disable-extensions"),
+            OsStr::new("--no-zygote"),               // Chrome's zygote process spawner requires fork capabilities
+                                                     // that are unavailable under cap_drop: ALL
+            OsStr::new("--disable-setuid-sandbox"),  // Belt-and-suspenders sandbox disable
         ];
 
         let chrome_path = std::path::PathBuf::from("/bin/chromium");
