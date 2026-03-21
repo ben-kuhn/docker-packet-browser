@@ -1,6 +1,7 @@
-use headless_chrome::{Browser, LaunchOptions, Tab};
-use std::ffi::OsStr;
-use std::sync::Arc;
+use headless_chrome::{Browser, Tab};
+use std::io::{BufRead, BufReader};
+use std::process::{Child, Command, Stdio};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -37,10 +38,145 @@ pub struct PageContent {
 
 pub struct BrowserInstance {
     browser: Browser,
+    _chrome: Child, // Keep the Chrome subprocess alive for this session
 }
 
-// Canonical traversal: same selector + filter order used by both extract and interact.
-// __INDEX__ and __VALUE__ are replaced by the caller before evaluation.
+// Chrome flags required to run inside a Docker container with cap_drop: ALL.
+// These are passed as CLI args when we spawn Chrome ourselves.
+const CHROME_ARGS: &[&str] = &[
+    "--headless",
+    "--remote-debugging-port=0",   // Let Chrome pick a free port; outputs URL to stderr
+    "--disable-dev-shm-usage",     // Docker limits /dev/shm to 64MB; forces Chrome to use /tmp
+    "--disable-gpu",               // No GPU in container
+    "--no-first-run",              // Skip first-run setup
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--no-zygote",                 // Zygote process spawner requires fork capabilities unavailable under cap_drop: ALL
+    "--disable-setuid-sandbox",
+    "--no-sandbox",
+];
+
+impl BrowserInstance {
+    pub fn new() -> Result<Self, BrowserError> {
+        eprintln!("[BROWSER] Launching Chrome at /bin/chromium");
+
+        let mut child = Command::new("/bin/chromium")
+            .args(CHROME_ARGS)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| BrowserError::LaunchFailed(format!("Failed to spawn /bin/chromium: {}", e)))?;
+
+        let stderr = child.stderr.take()
+            .ok_or_else(|| BrowserError::LaunchFailed("Could not capture Chrome stderr".to_string()))?;
+
+        // Read Chrome's stderr in a channel-based thread.
+        // - Every line is forwarded to eprintln! so it appears in docker logs.
+        // - When the DevTools URL is found, it is sent via channel.
+        let (tx, rx) = mpsc::channel::<String>();
+
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            let mut url_sent = false;
+            for line in reader.lines().flatten() {
+                eprintln!("[CHROME] {}", line);
+                if !url_sent {
+                    if let Some(url) = line.strip_prefix("DevTools listening on ") {
+                        let _ = tx.send(url.trim().to_string());
+                        url_sent = true;
+                        // tx is now done but the thread continues forwarding logs
+                    }
+                }
+            }
+            eprintln!("[CHROME] stderr closed (Chrome exited or crashed)");
+        });
+
+        let ws_url = match rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(url) => url,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                return Err(BrowserError::LaunchFailed(
+                    "Chrome did not output DevTools URL within 30 seconds".to_string()
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(BrowserError::LaunchFailed(
+                    "Chrome exited before outputting DevTools URL".to_string()
+                ));
+            }
+        };
+
+        eprintln!("[BROWSER] Chrome ready, connecting to {}", ws_url);
+
+        let browser = Browser::connect(ws_url)
+            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+
+        eprintln!("[BROWSER] Connected to Chrome DevTools");
+
+        Ok(Self { browser, _chrome: child })
+    }
+
+    pub fn fetch_page(&self, url: &str) -> Result<PageContent, BrowserError> {
+        eprintln!("[BROWSER] Fetching: {}", url);
+        let tab = self.browser.new_tab()
+            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+
+        tab.set_default_timeout(Duration::from_secs(30));
+
+        tab.navigate_to(url)
+            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+
+        tab.wait_until_navigated()
+            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+
+        eprintln!("[BROWSER] Page loaded: {}", url);
+        extract_page_content(&tab)
+    }
+
+    pub fn interact_with_input(
+        &self,
+        url: &str,
+        input_index: usize,
+        value: Option<&str>,
+    ) -> Result<PageContent, BrowserError> {
+        eprintln!("[BROWSER] Interacting with input {} on: {}", input_index, url);
+        let tab = self.browser.new_tab()
+            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+
+        tab.set_default_timeout(Duration::from_secs(30));
+
+        tab.navigate_to(url)
+            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+
+        tab.wait_until_navigated()
+            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+
+        let value_json = serde_json::to_string(value.unwrap_or(""))
+            .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
+
+        let js = JS_INTERACT
+            .replace("__INDEX__", &input_index.to_string())
+            .replace("__VALUE__", &value_json);
+
+        tab.evaluate(&js, false)
+            .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
+
+        tab.wait_until_navigated()
+            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+
+        extract_page_content(&tab)
+    }
+}
+
+impl Drop for BrowserInstance {
+    fn drop(&mut self) {
+        eprintln!("[BROWSER] Shutting down Chrome");
+        let _ = self._chrome.kill();
+    }
+}
+
+// --- JS constants (unchanged from before) ---
+
 const JS_COLLECT: &str = r#"
     (function collectSlots() {
         var out = [];
@@ -98,8 +234,6 @@ const JS_COLLECT: &str = r#"
 
 const JS_EXTRACT_INPUTS: &str = r#"JSON.stringify(__COLLECT__)"#;
 
-// Interact: re-traverses using same logic as collectSlots, acts on slot __INDEX__ (1-based).
-// __VALUE__ is a JSON-encoded string (already quoted).
 const JS_INTERACT: &str = r#"
     (function() {
         var seenRadios = {};
@@ -167,106 +301,7 @@ const JS_INTERACT: &str = r#"
     })()
 "#;
 
-impl BrowserInstance {
-    pub fn new() -> Result<Self, BrowserError> {
-        // Flags required for Chrome to function inside a Docker container:
-        // --disable-dev-shm-usage: Docker limits /dev/shm to 64MB; Chrome uses it
-        //   heavily for IPC and hangs or crashes without this flag. Forces Chrome
-        //   to use /tmp instead (our tmpfs).
-        // --disable-gpu: No GPU in container; prevents GPU process crashes.
-        // --no-first-run / --no-default-browser-check: Skip one-time setup dialogs
-        //   that block startup.
-        // --disable-extensions: No user extensions in a server context.
-        let args = vec![
-            OsStr::new("--disable-dev-shm-usage"),   // Use /tmp instead of /dev/shm (Docker limits shm to 64MB)
-            OsStr::new("--disable-gpu"),             // No GPU in container
-            OsStr::new("--no-first-run"),            // Skip first-run setup dialogs
-            OsStr::new("--no-default-browser-check"),
-            OsStr::new("--disable-extensions"),
-            OsStr::new("--no-zygote"),               // Chrome's zygote process spawner requires fork capabilities
-                                                     // that are unavailable under cap_drop: ALL
-            OsStr::new("--disable-setuid-sandbox"),  // Belt-and-suspenders sandbox disable
-        ];
-
-        let chrome_path = std::path::PathBuf::from("/bin/chromium");
-        let path = if chrome_path.exists() {
-            eprintln!("[BROWSER] Using Chromium at {}", chrome_path.display());
-            Some(chrome_path)
-        } else {
-            eprintln!("[BROWSER] /bin/chromium not found, letting headless_chrome auto-detect");
-            None
-        };
-
-        let launch_options = LaunchOptions::default_builder()
-            .headless(true)
-            .sandbox(false) // Sandbox requires kernel user namespaces; disabled for container security model
-            .path(path)
-            .args(args)
-            .build()
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
-
-        eprintln!("[BROWSER] Launching Chrome...");
-        let browser = Browser::new(launch_options)
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
-        eprintln!("[BROWSER] Chrome started successfully");
-
-        Ok(Self { browser })
-    }
-
-    pub fn fetch_page(&self, url: &str) -> Result<PageContent, BrowserError> {
-        eprintln!("[BROWSER] Fetching: {}", url);
-        let tab = self.browser.new_tab()
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
-
-        tab.set_default_timeout(Duration::from_secs(30));
-
-        tab.navigate_to(url)
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
-
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
-
-        eprintln!("[BROWSER] Page loaded: {}", url);
-        extract_page_content(&tab)
-    }
-
-    pub fn interact_with_input(
-        &self,
-        url: &str,
-        input_index: usize,
-        value: Option<&str>,
-    ) -> Result<PageContent, BrowserError> {
-        eprintln!("[BROWSER] Interacting with input {} on: {}", input_index, url);
-        let tab = self.browser.new_tab()
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
-
-        tab.set_default_timeout(Duration::from_secs(30));
-
-        tab.navigate_to(url)
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
-
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
-
-        let value_json = serde_json::to_string(value.unwrap_or(""))
-            .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
-
-        let js = JS_INTERACT
-            .replace("__INDEX__", &input_index.to_string())
-            .replace("__VALUE__", &value_json);
-
-        tab.evaluate(&js, false)
-            .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
-
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
-
-        extract_page_content(&tab)
-    }
-}
-
 fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
-    // Text
     let text_result = tab.evaluate(r#"document.body.innerText"#, false)
         .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
 
@@ -276,7 +311,6 @@ fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
 
     let text_lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
 
-    // Links
     let links_result = tab.evaluate(r#"
         Array.from(document.querySelectorAll('a[href]'))
             .map(a => a.href)
@@ -292,9 +326,7 @@ fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
         .map(|(i, url)| (i + 1, url))
         .collect();
 
-    // Inputs
     let extract_js = JS_EXTRACT_INPUTS.replace("__COLLECT__", JS_COLLECT);
-
     let inputs_result = tab.evaluate(&extract_js, false)
         .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
 
