@@ -1,4 +1,5 @@
 use headless_chrome::{Browser, LaunchOptions, Tab};
+use std::ffi::OsStr;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -168,14 +169,43 @@ const JS_INTERACT: &str = r#"
 
 impl BrowserInstance {
     pub fn new() -> Result<Self, BrowserError> {
+        // Flags required for Chrome to function inside a Docker container:
+        // --disable-dev-shm-usage: Docker limits /dev/shm to 64MB; Chrome uses it
+        //   heavily for IPC and hangs or crashes without this flag. Forces Chrome
+        //   to use /tmp instead (our tmpfs).
+        // --disable-gpu: No GPU in container; prevents GPU process crashes.
+        // --no-first-run / --no-default-browser-check: Skip one-time setup dialogs
+        //   that block startup.
+        // --disable-extensions: No user extensions in a server context.
+        let args = vec![
+            OsStr::new("--disable-dev-shm-usage"),
+            OsStr::new("--disable-gpu"),
+            OsStr::new("--no-first-run"),
+            OsStr::new("--no-default-browser-check"),
+            OsStr::new("--disable-extensions"),
+        ];
+
+        let chrome_path = std::path::PathBuf::from("/bin/chromium");
+        let path = if chrome_path.exists() {
+            eprintln!("[BROWSER] Using Chromium at {}", chrome_path.display());
+            Some(chrome_path)
+        } else {
+            eprintln!("[BROWSER] /bin/chromium not found, letting headless_chrome auto-detect");
+            None
+        };
+
         let launch_options = LaunchOptions::default_builder()
             .headless(true)
             .sandbox(false) // Sandbox requires kernel user namespaces; disabled for container security model
+            .path(path)
+            .args(args)
             .build()
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
+        eprintln!("[BROWSER] Launching Chrome...");
         let browser = Browser::new(launch_options)
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
+        eprintln!("[BROWSER] Chrome started successfully");
 
         Ok(Self { browser })
     }
