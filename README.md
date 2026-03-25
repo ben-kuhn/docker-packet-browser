@@ -88,7 +88,7 @@ services:
       - LISTEN_PORT=63004
       - PORTAL_URL=https://www.zeroretries.radio
       - IDLE_TIMEOUT_MINUTES=10
-      - LINES_PER_PAGE=15
+      - LINES_PER_PAGE=22
 
       # SSRF prevention - blocked IP ranges
       # Remove ranges to allow access to local services
@@ -142,7 +142,7 @@ services:
 | `LISTEN_PORT` | `63004` | TCP port the service listens on |
 | `PORTAL_URL` | `https://www.zeroretries.radio` | Default home page shown on connect |
 | `IDLE_TIMEOUT_MINUTES` | `10` | Session timeout for idle connections |
-| `LINES_PER_PAGE` | `15` | Number of lines per page in pagination |
+| `LINES_PER_PAGE` | `22` | Lines per page (VT52: 25 rows - footer) |
 | `BLOCKED_RANGES` | `127.0.0.0/8,10.0.0.0/8,...` | CIDR ranges blocked for SSRF prevention |
 | `BLOCKLIST_ENABLED` | `true` | Enable/disable local hosts-based blocklist |
 | `BLOCKLIST_REFRESH_HOURS` | `24` | How often to refresh blocklists from URLs |

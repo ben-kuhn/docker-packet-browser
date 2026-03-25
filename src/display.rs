@@ -80,3 +80,33 @@ pub fn format_inputs_section(inputs: &[InputField]) -> Vec<String> {
 pub fn format_page_footer() -> &'static str {
     "--- H=Help N=URL S=Search I<n>=Input P=Back M=Menu Q=Quit ---"
 }
+
+/// Format a summary of available links for display below content.
+/// Shows first few links that fit, with numbers for easy navigation.
+pub fn format_links_summary(links: &[(usize, String)], max_links: usize) -> String {
+    if links.is_empty() {
+        return String::new();
+    }
+
+    let display_links: Vec<String> = links.iter()
+        .take(max_links)
+        .map(|(idx, url)| {
+            // Truncate long URLs to fit in 80 columns
+            let truncated = if url.len() > 30 {
+                format!("{}...", &url[..27])
+            } else {
+                url.clone()
+            };
+            format!("[{}]{}", idx, truncated)
+        })
+        .collect();
+
+    let summary = display_links.join(" ");
+    let more = if links.len() > max_links {
+        format!(" +{} more (L=list)", links.len() - max_links)
+    } else {
+        String::new()
+    };
+
+    format!("{}{}", summary, more)
+}

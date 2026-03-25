@@ -34,7 +34,7 @@ impl Session {
             links: Vec::new(),
             inputs: Vec::new(),
             page_content: Vec::new(),
-            lines_per_page: 15,
+            lines_per_page: 22, // VT52: 25 rows - 3 for footer (links/inputs/help)
             full_page_mode: false,
             last_activity: Instant::now(),
         }

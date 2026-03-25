@@ -3,7 +3,7 @@ use packet_browser::{
     browser::{BrowserInstance, InputKind},
     commands::{parse_command, Command},
     config::Config,
-    display::{format_acknowledgment_prompt, format_help, format_inputs_section, format_page_footer, format_welcome, paginate},
+    display::{format_acknowledgment_prompt, format_help, format_inputs_section, format_links_summary, format_page_footer, format_welcome, paginate},
     filter::validate_url,
     logger::{LogEntry, LogStatus, Logger},
     session::{validate_callsign, Session},
@@ -389,20 +389,39 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
         return Ok(());
     }
 
+    // VT52-style layout: 25 rows total
+    // - Lines 1-21: Content (or fewer if page is short)
+    // - Line 22: Links summary (if any)
+    // - Line 23: Inputs summary (if any)
+    // - Line 24: Help footer
+    // - Line 25: Pagination prompt or command prompt
+
+    // Calculate effective content lines (leave room for footer elements)
+    let footer_lines = 3; // links + help + prompt
+    let effective_lines = session.lines_per_page.saturating_sub(footer_lines).max(5);
+
     if session.full_page_mode {
         for line in &session.page_content {
             writeln!(stream, "{}", line)?;
         }
+        // Show footer at end
+        display_footer(session, stream)?;
     } else {
-        let pages = paginate(&session.page_content, session.lines_per_page);
+        let pages = paginate(&session.page_content, effective_lines);
+        let total_pages = pages.len();
 
         for (page_num, page) in pages.iter().enumerate() {
+            // Content
             for line in page {
                 writeln!(stream, "{}", line)?;
             }
 
-            if page_num < pages.len() - 1 {
-                write!(stream, "\nPress ENTER to continue, or Q to stop: ")?;
+            // Always show footer elements after each page
+            display_footer(session, stream)?;
+
+            // Pagination prompt (not on last page)
+            if page_num < total_pages - 1 {
+                write!(stream, "[Page {}/{}] ENTER=more Q=stop: ", page_num + 1, total_pages)?;
                 stream.flush()?;
 
                 let mut reader = BufReader::new(stream.try_clone()?);
@@ -412,13 +431,28 @@ fn display_content(session: &mut Session, stream: &mut TcpStream) -> std::io::Re
                 if input.trim().to_lowercase() == "q" {
                     break;
                 }
+                writeln!(stream)?; // Blank line before next page
             }
         }
     }
 
+    Ok(())
+}
+
+/// Display the footer section: links summary, inputs, and help text
+fn display_footer(session: &Session, stream: &mut TcpStream) -> std::io::Result<()> {
+    // Links summary (show first 5 links)
+    let links_line = format_links_summary(&session.links, 5);
+    if !links_line.is_empty() {
+        writeln!(stream, "{}", links_line)?;
+    }
+
+    // Full inputs section
     for line in format_inputs_section(&session.inputs) {
         writeln!(stream, "{}", line)?;
     }
+
+    // Help footer - always visible
     writeln!(stream, "{}", format_page_footer())?;
 
     Ok(())

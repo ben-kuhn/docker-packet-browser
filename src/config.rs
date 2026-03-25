@@ -14,7 +14,7 @@ pub struct Config {
     pub syslog_enabled: bool,                // default: false
     pub syslog_host: Option<String>,         // default: None
     pub syslog_port: u16,                    // default: 514
-    pub lines_per_page: usize,               // default: 15
+    pub lines_per_page: usize,               // default: 22 (VT52: 25 rows - footer)
     pub debug_mode: bool,                    // default: false
 }
 
@@ -43,7 +43,7 @@ impl Config {
             syslog_enabled: parse_env_bool("SYSLOG_ENABLED", false),
             syslog_host: env::var("SYSLOG_HOST").ok(),
             syslog_port: parse_env_u16("SYSLOG_PORT", 514),
-            lines_per_page: parse_env_usize("LINES_PER_PAGE", 15),
+            lines_per_page: parse_env_usize("LINES_PER_PAGE", 22),
             debug_mode: parse_env_bool("DEBUG_MODE", false),
         }
     }
