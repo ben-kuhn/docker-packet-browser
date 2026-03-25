@@ -25,7 +25,6 @@ smoke-test:
 	  -v /tmp/smoke-logs:/var/log/packet-browser \
 	  -v /tmp/smoke-hosts:/etc/hosts \
 	  --cap-drop ALL \
-	  --cap-add NET_RAW \
 	  -e DEBUG_MODE=true \
 	  -e BLOCKLIST_ENABLED=false \
 	  -e PORTAL_URL=https://example.com \

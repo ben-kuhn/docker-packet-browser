@@ -5,7 +5,6 @@ pub struct Config {
     pub listen_port: u16,                    // default: 63004
     pub portal_url: String,                  // default: "http://matrix.ehvairport.com/~bpq/"
     pub idle_timeout_minutes: u64,           // default: 10
-    pub dns_servers: Vec<String>,            // default: ["208.67.222.123", "208.67.220.123"]
     pub blocked_ranges: Vec<String>,         // default: ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
     pub blocklist_urls: Vec<String>,         // default: empty
     pub blocklist_refresh_hours: u64,        // default: 24
@@ -26,10 +25,6 @@ impl Config {
             portal_url: env::var("PORTAL_URL")
                 .unwrap_or_else(|_| "http://matrix.ehvairport.com/~bpq/".to_string()),
             idle_timeout_minutes: parse_env_u64("IDLE_TIMEOUT_MINUTES", 10),
-            dns_servers: parse_env_vec("DNS_SERVERS", vec![
-                "208.67.222.123".to_string(),
-                "208.67.220.123".to_string(),
-            ]),
             blocked_ranges: parse_env_vec(
                 "BLOCKED_RANGES",
                 vec![

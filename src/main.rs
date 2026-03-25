@@ -16,6 +16,19 @@ use std::thread;
 const VERSION: &str = "0.1.0";
 
 fn main() {
+    // Health check mode: attempt a TCP connect to the service port and exit 0/1.
+    // Used by the Docker HEALTHCHECK so no shell or netcat is needed in the image.
+    if std::env::args().any(|a| a == "--healthcheck") {
+        let port = std::env::var("LISTEN_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(63004);
+        match TcpStream::connect(format!("127.0.0.1:{}", port)) {
+            Ok(_) => std::process::exit(0),
+            Err(_) => std::process::exit(1),
+        }
+    }
+
     let config = Arc::new(Config::from_env());
 
     println!("Starting packet-browser v{}", VERSION);
