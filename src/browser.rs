@@ -72,6 +72,11 @@ impl BrowserInstance {
             .collect();
         let session_dir = format!("/tmp/chrome-{}", safe_id);
 
+        // Create session directory before Chrome starts. Crashpad may spawn before
+        // Chrome creates --user-data-dir, and BREAKPAD_DUMP_LOCATION must exist.
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| BrowserError::LaunchFailed(format!("Failed to create session dir: {}", e)))?;
+
         eprintln!("[BROWSER] Launching Chrome at /bin/chromium");
 
         let mut child = Command::new("/bin/chromium")
