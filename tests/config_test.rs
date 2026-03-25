@@ -48,7 +48,7 @@ fn test_config_defaults() {
     assert!(!config.syslog_enabled);
     assert_eq!(config.syslog_host, None);
     assert_eq!(config.syslog_port, 514);
-    assert_eq!(config.lines_per_page, 15);
+    assert_eq!(config.lines_per_page, 22); // VT52: 25 rows - footer
     assert!(!config.debug_mode);
 }
 
