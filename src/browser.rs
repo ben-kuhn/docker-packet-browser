@@ -74,8 +74,11 @@ impl BrowserInstance {
 
         // Create session directory before Chrome starts. Crashpad may spawn before
         // Chrome creates --user-data-dir, and BREAKPAD_DUMP_LOCATION must exist.
-        std::fs::create_dir_all(&session_dir)
-            .map_err(|e| BrowserError::LaunchFailed(format!("Failed to create session dir: {}", e)))?;
+        // If creation fails (e.g., tmpfs not mounted yet), continue anyway - Chrome
+        // will attempt to create it via --user-data-dir.
+        if let Err(e) = std::fs::create_dir_all(&session_dir) {
+            eprintln!("[BROWSER] Warning: could not pre-create session dir: {}", e);
+        }
 
         eprintln!("[BROWSER] Launching Chrome at /bin/chromium");
 

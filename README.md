@@ -67,12 +67,9 @@ docker compose up -d
 Create `docker-compose.yml`:
 
 ```yaml
-version: '3.8'
-
 services:
   packet-browser:
-    image: ghcr.io/ben-kuhn/packet-browser:latest
-    # Or use: packet-browser:latest (if built locally)
+    image: ghcr.io/ben-kuhn/docker-packet-browser:latest
 
     ports:
       # Bind to loopback only by default (security)
@@ -92,9 +89,6 @@ services:
       - PORTAL_URL=https://www.zeroretries.radio
       - IDLE_TIMEOUT_MINUTES=10
       - LINES_PER_PAGE=15
-
-      # DNS filtering (OpenDNS Family Shield)
-      - DNS_SERVERS=208.67.222.123,208.67.220.123
 
       # SSRF prevention - blocked IP ranges
       # Remove ranges to allow access to local services
@@ -118,19 +112,19 @@ services:
     # Security hardening
     read_only: true
     tmpfs:
-      - /tmp:size=64M,mode=1777
+      - /tmp:size=128M,mode=1777
+      - /dev/shm:size=64M,mode=1777
 
     cap_drop:
       - ALL
-    cap_add:
-      - NET_RAW  # Required for DNS
 
-    # Health check
+    # Health check (uses binary's built-in --healthcheck flag)
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "63004"]
+      test: ["CMD", "/bin/packet-browser", "--healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 60s
 
     restart: unless-stopped
 ```
@@ -143,7 +137,6 @@ services:
 | `PORTAL_URL` | `https://www.zeroretries.radio` | Default home page shown on connect |
 | `IDLE_TIMEOUT_MINUTES` | `10` | Session timeout for idle connections |
 | `LINES_PER_PAGE` | `15` | Number of lines per page in pagination |
-| `DNS_SERVERS` | `208.67.222.123,208.67.220.123` | DNS servers for filtering (OpenDNS Family Shield) |
 | `BLOCKED_RANGES` | `127.0.0.0/8,10.0.0.0/8,...` | CIDR ranges blocked for SSRF prevention |
 | `BLOCKLIST_ENABLED` | `true` | Enable/disable local hosts-based blocklist |
 | `BLOCKLIST_REFRESH_HOURS` | `24` | How often to refresh blocklists from URLs |

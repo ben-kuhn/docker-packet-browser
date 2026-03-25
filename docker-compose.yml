@@ -1,9 +1,6 @@
-version: '3.8'
-
 services:
   packet-browser:
-    image: packet-browser:latest
-    # Or use: ghcr.io/ben-kuhn/packet-browser:latest
+    image: ghcr.io/ben-kuhn/docker-packet-browser:latest
 
     ports:
       # Bind to loopback only by default (security)
