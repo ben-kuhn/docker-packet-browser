@@ -119,10 +119,10 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
     // Show welcome message
     writeln!(stream, "\n{}\n", format_welcome(&callsign, VERSION))?;
 
-    // Initialize browser
+    // Initialize browser (wrapped in Option for crash recovery)
     eprintln!("[BROWSER] Initializing for {}", callsign);
-    let browser = match BrowserInstance::new(&callsign) {
-        Ok(b) => { eprintln!("[BROWSER] Ready for {}", callsign); b }
+    let mut browser: Option<BrowserInstance> = match BrowserInstance::new(&callsign) {
+        Ok(b) => { eprintln!("[BROWSER] Ready for {}", callsign); Some(b) }
         Err(e) => {
             eprintln!("[BROWSER] Failed to initialize: {}", e);
             writeln!(stream, "Failed to initialize browser: {}", e)?;
@@ -132,7 +132,7 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
 
     // Load portal page
     eprintln!("[PORTAL] Loading {} for {}", config.portal_url, callsign);
-    if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &config.portal_url) {
+    if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &config.portal_url) {
         eprintln!("[PORTAL] Failed for {}: {}", callsign, e);
         writeln!(stream, "Failed to load portal: {}", e)?;
     }
@@ -171,13 +171,13 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
             }
             Command::Menu => {
                 let url = config.portal_url.clone();
-                if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &url) {
+                if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &url) {
                     writeln!(stream, "Error loading menu: {}", e)?;
                 }
             }
             Command::Back => {
                 if let Some(prev_url) = session.previous_url.clone() {
-                    if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &prev_url) {
+                    if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &prev_url) {
                         writeln!(stream, "Error loading previous page: {}", e)?;
                     }
                 } else {
@@ -216,7 +216,7 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
             Command::LoadLink(num) => {
                 if let Some((_, url)) = session.links.iter().find(|(idx, _)| *idx == num) {
                     let url = url.clone();
-                    if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &url) {
+                    if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &url) {
                         writeln!(stream, "Error loading link: {}", e)?;
                     }
                 } else {
@@ -224,14 +224,14 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                 }
             }
             Command::NewUrl(url) => {
-                if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &url) {
+                if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &url) {
                     writeln!(stream, "Error loading URL: {}", e)?;
                 }
             }
             Command::Search(query) => {
                 let encoded_query = urlencoding::encode(&query);
                 let url = format!("https://en.wikipedia.org/wiki/Special:Search?search={}", encoded_query);
-                if let Err(e) = load_page(&mut session, &browser, &config, &logger, &mut stream, &url) {
+                if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &url) {
                     writeln!(stream, "Error searching: {}", e)?;
                 }
             }
@@ -244,7 +244,13 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                         } else {
                             writeln!(stream, "Submitting...")?;
                             stream.flush()?;
-                            match browser.interact_with_input(&url, num, value.as_deref()) {
+                            // Try interaction, restart browser on crash
+                            let result = if let Some(ref b) = browser {
+                                b.interact_with_input(&url, num, value.as_deref())
+                            } else {
+                                Err(packet_browser::browser::BrowserError::BrowserCrashed)
+                            };
+                            match result {
                                 Ok(content) => {
                                     session.previous_url = Some(url);
                                     session.links = content.links;
@@ -252,7 +258,17 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                                     session.page_content = content.text;
                                     display_content(&mut session, &mut stream)?;
                                 }
-                                Err(e) => writeln!(stream, "Failed: {}", e)?,
+                                Err(e) => {
+                                    // Check if this is a connection error (browser crashed)
+                                    let err_str = e.to_string();
+                                    if err_str.contains("connection is closed") || err_str.contains("BrowserCrashed") {
+                                        eprintln!("[BROWSER] Chrome crashed, restarting for {}", callsign);
+                                        writeln!(stream, "Browser restarting, please try again...")?;
+                                        browser = BrowserInstance::new(&callsign).ok();
+                                    } else {
+                                        writeln!(stream, "Failed: {}", e)?;
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -275,7 +291,8 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
 
 fn load_page(
     session: &mut Session,
-    browser: &BrowserInstance,
+    browser: &mut Option<BrowserInstance>,
+    callsign: &str,
     config: &Config,
     logger: &Logger,
     stream: &mut TcpStream,
@@ -294,22 +311,53 @@ fn load_page(
         return Ok(());
     }
 
-    // Fetch page
+    // Fetch page (with crash recovery)
     writeln!(stream, "Loading...")?;
     stream.flush()?;
 
-    let page_content = match browser.fetch_page(url) {
-        Ok(content) => content,
-        Err(e) => {
-            writeln!(stream, "Failed to load page: {}", e)?;
-            let log_entry = LogEntry::new(
-                session.callsign.clone(),
-                url.to_string(),
-                LogStatus::Error,
-                Some(e.to_string()),
-            );
-            let _ = logger.log(&log_entry);
-            return Ok(());
+    let page_content = loop {
+        let b = match browser.as_ref() {
+            Some(b) => b,
+            None => {
+                // Browser not available, try to restart
+                eprintln!("[BROWSER] No browser instance, creating for {}", callsign);
+                *browser = BrowserInstance::new(callsign).ok();
+                if browser.is_none() {
+                    writeln!(stream, "Failed to start browser")?;
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+
+        match b.fetch_page(url) {
+            Ok(content) => break content,
+            Err(e) => {
+                let err_str = e.to_string();
+                // Check if browser crashed (WebSocket closed)
+                if err_str.contains("connection is closed") {
+                    eprintln!("[BROWSER] Chrome crashed, restarting for {}", callsign);
+                    writeln!(stream, "Browser restarting...")?;
+                    stream.flush()?;
+                    *browser = BrowserInstance::new(callsign).ok();
+                    if browser.is_none() {
+                        writeln!(stream, "Failed to restart browser")?;
+                        return Ok(());
+                    }
+                    // Retry the fetch
+                    continue;
+                }
+                // Other error, don't retry
+                writeln!(stream, "Failed to load page: {}", e)?;
+                let log_entry = LogEntry::new(
+                    session.callsign.clone(),
+                    url.to_string(),
+                    LogStatus::Error,
+                    Some(e.to_string()),
+                );
+                let _ = logger.log(&log_entry);
+                return Ok(());
+            }
         }
     };
 

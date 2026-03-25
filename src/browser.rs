@@ -14,6 +14,8 @@ pub enum BrowserError {
     NavigationFailed(String),
     #[error("Failed to extract content: {0}")]
     ExtractionFailed(String),
+    #[error("Browser crashed - please try again")]
+    BrowserCrashed,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,7 @@ const CHROME_ARGS: &[&str] = &[
     // --user-data-dir is set dynamically per session (scoped to callsign)
     "--disable-dev-shm-usage",     // Docker limits /dev/shm; use /tmp instead
     "--disable-gpu",               // No GPU in container
+    "--disable-software-rasterizer",
     "--no-first-run",              // Skip first-run setup
     "--no-default-browser-check",
     "--disable-extensions",
@@ -62,6 +65,11 @@ const CHROME_ARGS: &[&str] = &[
     // non-fatal — renderers stay alive despite the logged error.
     "--disable-crash-reporter",
     "--disable-breakpad",
+    // Disable features that cause crashes in containers without GPU/AI hardware
+    "--disable-features=VizDisplayCompositor,Vulkan,OnDeviceModel",
+    "--disable-vulkan",
+    "--disable-accelerated-2d-canvas",
+    "--disable-accelerated-video-decode",
 ];
 
 impl BrowserInstance {

@@ -118,6 +118,12 @@ services:
     cap_drop:
       - ALL
 
+    # DNS filtering - uses OpenDNS Family Shield by default
+    # These servers filter adult content, malware, and phishing sites
+    dns:
+      - 208.67.222.123
+      - 208.67.220.123
+
     # Health check (uses binary's built-in --healthcheck flag)
     healthcheck:
       test: ["CMD", "/bin/packet-browser", "--healthcheck"]
