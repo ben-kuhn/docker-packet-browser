@@ -1,4 +1,5 @@
 use headless_chrome::{Browser, Tab};
+use std::time::Instant;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc};
@@ -38,6 +39,7 @@ pub struct PageContent {
 
 pub struct BrowserInstance {
     browser: Browser,
+    tab: Arc<Tab>,  // Persistent initial tab — reused to avoid spawning new renderers
     _chrome: Child, // Keep the Chrome subprocess alive for this session
 }
 
@@ -47,14 +49,17 @@ const CHROME_ARGS: &[&str] = &[
     "--headless",
     "--remote-debugging-port=0",   // Let Chrome pick a free port; outputs URL to stderr
     // --user-data-dir is set dynamically per session (scoped to callsign)
-    "--disable-dev-shm-usage",     // Docker limits /dev/shm to 64MB; forces Chrome to use /tmp
+    "--disable-dev-shm-usage",     // Docker limits /dev/shm; use /tmp instead
     "--disable-gpu",               // No GPU in container
     "--no-first-run",              // Skip first-run setup
     "--no-default-browser-check",
     "--disable-extensions",
-    "--no-zygote",                 // Zygote process spawner requires fork capabilities unavailable under cap_drop: ALL
     "--disable-setuid-sandbox",
     "--no-sandbox",
+    // NOTE: --no-zygote omitted intentionally. Without the zygote, renderers are spawned
+    // via exec and fail to inherit FD 7 (pseudonymization salt handle), causing them to
+    // crash and exit. With the zygote, FD 7 is inherited via fork and the error is
+    // non-fatal — renderers stay alive despite the logged error.
     "--disable-crash-reporter",
     "--disable-breakpad",
 ];
@@ -73,6 +78,7 @@ impl BrowserInstance {
             .args(CHROME_ARGS)
             .arg(format!("--user-data-dir={}", session_dir))
             .env("BREAKPAD_DUMP_LOCATION", &session_dir) // Scoped per-session: prevents crashpad crash and isolates dumps
+            .env("HOME", "/tmp")   // Root fs is read-only; HOME=/tmp gives Chrome a writable config dir
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -119,29 +125,55 @@ impl BrowserInstance {
 
         eprintln!("[BROWSER] Chrome ready, connecting to {}", ws_url);
 
-        let browser = Browser::connect(ws_url)
+        // 120-second idle_browser_timeout lets Tab::new() → Page::Enable survive Chrome's
+        // ~60-second renderer retry delay (Chrome 146 + kernel 6.19+ compatibility issue).
+        let browser = Browser::connect_with_timeout(ws_url, Duration::from_secs(120))
             .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
         eprintln!("[BROWSER] Connected to Chrome DevTools");
 
-        Ok(Self { browser, _chrome: child })
+        // Chrome 146 + Linux 6.19+ may take ~60s for renderers to stabilize.
+        // Poll get_tabs() directly rather than using wait_for_initial_tab() (which falls
+        // back to new_tab() after 10s and creates renderer churn). The event dispatch
+        // thread internally calls Tab::new() which waits up to 120s (idle_browser_timeout)
+        // for Page.enable to succeed once the renderer is ready.
+        eprintln!("[BROWSER] Waiting for Chrome renderer to stabilize...");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let tab = loop {
+            if let Some(tab) = browser.get_tabs().lock().unwrap().first().cloned() {
+                break tab;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                return Err(BrowserError::LaunchFailed(
+                    "Chrome renderer did not stabilize within 120 seconds".to_string()
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        };
+
+        eprintln!("[BROWSER] Chrome renderer ready");
+        tab.set_default_timeout(Duration::from_secs(15));
+
+        Ok(Self { browser, tab, _chrome: child })
     }
 
     pub fn fetch_page(&self, url: &str) -> Result<PageContent, BrowserError> {
         eprintln!("[BROWSER] Fetching: {}", url);
-        let tab = self.browser.new_tab()
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
-        tab.set_default_timeout(Duration::from_secs(30));
-
-        tab.navigate_to(url)
+        self.tab.navigate_to(url)
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
 
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+        // Best-effort wait: Chrome may not send networkAlmostIdle in constrained
+        // container environments. If it times out, attempt extraction anyway — the
+        // renderer may still be functional despite not emitting lifecycle events.
+        if let Err(e) = self.tab.wait_until_navigated() {
+            eprintln!("[BROWSER] Navigation timeout ({}), attempting extraction anyway", e);
+            std::thread::sleep(Duration::from_secs(3));
+        }
 
         eprintln!("[BROWSER] Page loaded: {}", url);
-        extract_page_content(&tab)
+        extract_page_content(&self.tab)
     }
 
     pub fn interact_with_input(
@@ -151,16 +183,14 @@ impl BrowserInstance {
         value: Option<&str>,
     ) -> Result<PageContent, BrowserError> {
         eprintln!("[BROWSER] Interacting with input {} on: {}", input_index, url);
-        let tab = self.browser.new_tab()
-            .map_err(|e| BrowserError::LaunchFailed(e.to_string()))?;
 
-        tab.set_default_timeout(Duration::from_secs(30));
-
-        tab.navigate_to(url)
+        self.tab.navigate_to(url)
             .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
 
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+        if let Err(e) = self.tab.wait_until_navigated() {
+            eprintln!("[BROWSER] Navigation timeout ({}), attempting interaction anyway", e);
+            std::thread::sleep(Duration::from_secs(3));
+        }
 
         let value_json = serde_json::to_string(value.unwrap_or(""))
             .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
@@ -169,13 +199,15 @@ impl BrowserInstance {
             .replace("__INDEX__", &input_index.to_string())
             .replace("__VALUE__", &value_json);
 
-        tab.evaluate(&js, false)
+        self.tab.evaluate(&js, false)
             .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
 
-        tab.wait_until_navigated()
-            .map_err(|e| BrowserError::NavigationFailed(e.to_string()))?;
+        if let Err(e) = self.tab.wait_until_navigated() {
+            eprintln!("[BROWSER] Post-interaction navigation timeout ({}), attempting extraction anyway", e);
+            std::thread::sleep(Duration::from_secs(3));
+        }
 
-        extract_page_content(&tab)
+        extract_page_content(&self.tab)
     }
 }
 

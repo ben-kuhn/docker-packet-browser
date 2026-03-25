@@ -2,7 +2,7 @@
   description = "Packet Browser - Secure web browser for packet radio";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
   };
@@ -44,8 +44,11 @@
               pkgs.dumb-init
               pkgs.logrotate
               pkgs.cacert
+              pkgs.fontconfig       # Runtime font configuration (fontconfig.conf, fc-cache)
+              pkgs.liberation_ttf   # Core font set (replaces Arial/Times/Courier)
+              pkgs.noto-fonts       # Wide Unicode coverage for packet radio text pages
             ];
-            pathsToLink = [ "/bin" "/etc" ];
+            pathsToLink = [ "/bin" "/etc" "/share" ];
           };
 
           config = {
@@ -53,6 +56,9 @@
             ExposedPorts = { "63004/tcp" = {}; };
             Env = [
               "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              # buildEnv does not create /etc/fonts at the root level; point fontconfig
+              # directly at the store path so Chrome's font manager initialises correctly.
+              "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf"
             ];
             User = "1000:1000";
           };
