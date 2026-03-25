@@ -7,7 +7,6 @@ fn test_config_defaults() {
         "LISTEN_PORT",
         "PORTAL_URL",
         "IDLE_TIMEOUT_MINUTES",
-        "DNS_SERVERS",
         "BLOCKED_RANGES",
         "BLOCKLIST_URLS",
         "BLOCKLIST_REFRESH_HOURS",
@@ -31,10 +30,6 @@ fn test_config_defaults() {
     assert_eq!(config.listen_port, 63004);
     assert_eq!(config.portal_url, "http://matrix.ehvairport.com/~bpq/");
     assert_eq!(config.idle_timeout_minutes, 10);
-    assert_eq!(
-        config.dns_servers,
-        vec!["208.67.222.123", "208.67.220.123"]
-    );
     assert_eq!(
         config.blocked_ranges,
         vec![
@@ -64,7 +59,6 @@ fn test_config_env_override() {
         "LISTEN_PORT",
         "PORTAL_URL",
         "IDLE_TIMEOUT_MINUTES",
-        "DNS_SERVERS",
         "BLOCKED_RANGES",
         "BLOCKLIST_URLS",
         "BLOCKLIST_REFRESH_HOURS",
@@ -86,7 +80,6 @@ fn test_config_env_override() {
     std::env::set_var("LISTEN_PORT", "8080");
     std::env::set_var("PORTAL_URL", "http://custom.example.com/");
     std::env::set_var("IDLE_TIMEOUT_MINUTES", "30");
-    std::env::set_var("DNS_SERVERS", "1.1.1.1, 8.8.8.8");
     std::env::set_var("BLOCKED_RANGES", "192.168.1.0/24, 10.0.0.0/8");
     std::env::set_var("BLOCKLIST_URLS", "http://example.com/list1, http://example.com/list2");
     std::env::set_var("BLOCKLIST_REFRESH_HOURS", "48");
@@ -105,7 +98,6 @@ fn test_config_env_override() {
     assert_eq!(config.listen_port, 8080);
     assert_eq!(config.portal_url, "http://custom.example.com/");
     assert_eq!(config.idle_timeout_minutes, 30);
-    assert_eq!(config.dns_servers, vec!["1.1.1.1", "8.8.8.8"]);
     assert_eq!(
         config.blocked_ranges,
         vec!["192.168.1.0/24", "10.0.0.0/8"]
