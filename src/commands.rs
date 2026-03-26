@@ -80,17 +80,34 @@ pub fn parse_command(input: &str) -> Command {
         return Command::Search(query);
     }
 
-    // Fill/interact with input field: i <num> [value]
-    if input.starts_with("i ") {
-        let rest = input[2..].trim();
-        if let Some(space) = rest.find(' ') {
-            if let Ok(num) = rest[..space].parse::<usize>() {
-                return Command::FillInput(num, Some(rest[space + 1..].trim().to_string()));
+    // Fill/interact with input field: i<num> [value] or i <num> [value]
+    // Accepts: I1 search term, I 1 search term, I1, I 1
+    if input.starts_with("i") && input.len() > 1 {
+        let rest = input[1..].trim_start(); // Skip 'i', then optional whitespace
+
+        // Try to parse the number (with or without space after 'i')
+        let (num_str, remainder) = if let Some(space_pos) = rest.find(' ') {
+            (&rest[..space_pos], rest[space_pos + 1..].trim())
+        } else {
+            (rest, "")
+        };
+
+        // Extract number from start of num_str (handles "1" or "1abc" edge cases)
+        let num_end = num_str.chars().take_while(|c| c.is_ascii_digit()).count();
+        if num_end > 0 {
+            if let Ok(num) = num_str[..num_end].parse::<usize>() {
+                // Check if there's remaining text after the number
+                let after_num = &num_str[num_end..];
+                let value = if !after_num.is_empty() {
+                    // e.g., "i1abc" -> num=1, value="abc"
+                    Some(format!("{}{}", after_num, if remainder.is_empty() { "" } else { " " }).to_string() + remainder)
+                } else if !remainder.is_empty() {
+                    Some(remainder.to_string())
+                } else {
+                    None
+                };
+                return Command::FillInput(num, value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()));
             }
-        }
-        // No value — valid for checkbox toggle
-        if let Ok(num) = rest.parse::<usize>() {
-            return Command::FillInput(num, None);
         }
     }
 

@@ -50,31 +50,52 @@ pub fn format_inputs_section(inputs: &[InputField]) -> Vec<String> {
         return vec![];
     }
 
-    let mut lines = vec!["--- Inputs ---".to_string()];
+    let mut lines = vec!["--- Inputs: I<n> <value> to fill, I<n> to toggle ---".to_string()];
     for field in inputs {
+        // Make label more user-friendly - if it's a short cryptic name, show type hint
+        let label = if field.label.is_empty() || field.label.len() <= 2 {
+            match &field.kind {
+                InputKind::Text => "text input".to_string(),
+                InputKind::Select { .. } => "dropdown".to_string(),
+                InputKind::Radio { .. } => "choice".to_string(),
+                InputKind::Checkbox { .. } => "checkbox".to_string(),
+            }
+        } else {
+            field.label.clone()
+        };
+
         let detail = match &field.kind {
-            InputKind::Text => "(text)".to_string(),
+            InputKind::Text => "-> I{} your text here".to_string(),
             InputKind::Select { options } => {
-                let opts = options.iter().enumerate()
-                    .map(|(i, o)| format!("{}={}", i + 1, o))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!("(select) {}", opts)
+                let opts: Vec<String> = options.iter().take(4).enumerate()
+                    .map(|(i, o)| format!("{}={}", i + 1, truncate_str(o, 15)))
+                    .collect();
+                let more = if options.len() > 4 { "..." } else { "" };
+                format!("-> I{{}} <1-{}> {}{}", options.len(), opts.join(" "), more)
             }
             InputKind::Radio { options } => {
-                let opts = options.iter().enumerate()
-                    .map(|(i, o)| format!("{}={}", i + 1, o))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!("(radio) {}", opts)
+                let opts: Vec<String> = options.iter().take(4).enumerate()
+                    .map(|(i, o)| format!("{}={}", i + 1, truncate_str(o, 15)))
+                    .collect();
+                let more = if options.len() > 4 { "..." } else { "" };
+                format!("-> I{{}} <1-{}> {}{}", options.len(), opts.join(" "), more)
             }
             InputKind::Checkbox { checked } => {
-                format!("(checkbox) {}", if *checked { "ON" } else { "OFF" })
+                format!("[{}] -> I{{}} to toggle", if *checked { "X" } else { " " })
             }
         };
-        lines.push(format!("[I{}] {} {}", field.index, field.label, detail));
+        let detail = detail.replace("{}", &field.index.to_string());
+        lines.push(format!("[I{}] {}: {}", field.index, label, detail));
     }
     lines
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
 }
 
 pub fn format_page_footer() -> &'static str {

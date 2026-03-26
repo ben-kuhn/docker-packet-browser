@@ -360,31 +360,90 @@ const JS_INTERACT: &str = r#"
     })()
 "#;
 
+// JavaScript to extract page content with inline link [n] and input [In] markers
+const JS_EXTRACT_PAGE: &str = r#"
+(function() {
+    // Clone the body so we can modify it without affecting the page
+    var clone = document.body.cloneNode(true);
+
+    // Collect and mark links
+    var links = [];
+    var linkIndex = 1;
+    var cloneAnchors = clone.querySelectorAll('a[href]');
+    for (var i = 0; i < cloneAnchors.length; i++) {
+        var a = cloneAnchors[i];
+        var href = a.href;
+        if (href && href.startsWith('http')) {
+            var marker = '[' + linkIndex + ']';
+            a.insertBefore(document.createTextNode(marker), a.firstChild);
+            links.push(href);
+            linkIndex++;
+        }
+    }
+
+    // Mark input fields inline with [In] markers
+    var inputIndex = 1;
+    var seenRadios = {};
+    var inputs = clone.querySelectorAll('input, select, textarea');
+    for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        if (el.disabled || el.offsetParent === null) continue;
+        var tag = el.tagName.toLowerCase();
+        var type = (el.getAttribute('type') ||
+            (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : 'text')
+        ).toLowerCase();
+        if (/^(hidden|submit|button|image|file|reset)$/.test(type)) continue;
+
+        // Handle radio groups (only mark first)
+        if (type === 'radio') {
+            var name = el.name;
+            if (!name || seenRadios[name]) continue;
+            seenRadios[name] = 1;
+        }
+
+        // Insert marker before the input element
+        var marker = document.createTextNode('[I' + inputIndex + ']');
+        if (el.parentNode) {
+            el.parentNode.insertBefore(marker, el);
+        }
+        inputIndex++;
+    }
+
+    // Extract text with all markers
+    var text = clone.innerText || '';
+
+    return JSON.stringify({ text: text, links: links });
+})()
+"#;
+
 fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
-    let text_result = tab.evaluate(r#"document.body.innerText"#, false)
+    // Extract text with inline link markers and link URLs in one call
+    let result = tab.evaluate(JS_EXTRACT_PAGE, false)
         .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
 
-    let text = text_result.value
+    let json_str = result.value
         .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
+        .unwrap_or_else(|| r#"{"text":"","links":[]}"#.to_string());
 
-    let text_lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    // Parse the JSON response
+    #[derive(serde::Deserialize)]
+    struct ExtractResult {
+        text: String,
+        links: Vec<String>,
+    }
 
-    let links_result = tab.evaluate(r#"
-        Array.from(document.querySelectorAll('a[href]'))
-            .map(a => a.href)
-            .filter(href => href.startsWith('http'))
-    "#, false).map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
+    let extracted: ExtractResult = serde_json::from_str(&json_str)
+        .unwrap_or(ExtractResult { text: String::new(), links: Vec::new() });
 
-    let links: Vec<(usize, String)> = links_result.value
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default()
+    let text_lines: Vec<String> = extracted.text.lines().map(|l| l.to_string()).collect();
+
+    let links: Vec<(usize, String)> = extracted.links
         .into_iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .enumerate()
         .map(|(i, url)| (i + 1, url))
         .collect();
 
+    // Extract input fields
     let extract_js = JS_EXTRACT_INPUTS.replace("__COLLECT__", JS_COLLECT);
     let inputs_result = tab.evaluate(&extract_js, false)
         .map_err(|e| BrowserError::ExtractionFailed(e.to_string()))?;
