@@ -409,8 +409,15 @@ const JS_EXTRACT_PAGE: &str = r#"
         inputIndex++;
     }
 
-    // Extract text with all markers
+    // Extract text with all markers, then clean up excessive whitespace
     var text = clone.innerText || '';
+
+    // Collapse multiple blank lines into single blank line
+    text = text.replace(/\n\s*\n\s*\n/g, '\n\n');
+    // Remove leading/trailing whitespace from each line
+    text = text.split('\n').map(function(line) { return line.trim(); }).join('\n');
+    // Remove multiple consecutive blank lines again after trimming
+    text = text.replace(/\n\n+/g, '\n\n');
 
     return JSON.stringify({ text: text, links: links });
 })()

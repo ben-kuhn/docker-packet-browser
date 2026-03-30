@@ -33,7 +33,7 @@
         };
 
         dockerImage = pkgs.dockerTools.buildImage {
-          name = "packet-browser";
+          name = "docker-packet-browser";
           tag = "latest";
 
           copyToRoot = pkgs.buildEnv {

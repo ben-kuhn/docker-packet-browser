@@ -67,9 +67,9 @@ jobs:
             -e DEBUG_MODE=true \
             -e BLOCKLIST_ENABLED=false \
             -e PORTAL_URL=https://example.com \
-            packet-browser:latest
+            docker-packet-browser:latest
 
-          echo "Waiting for packet-browser to start listening..."
+          echo "Waiting for docker-packet-browser to start listening..."
           timeout 30 bash -c 'until nc -z 127.0.0.1 63004 2>/dev/null; do sleep 1; done'
           echo "Service is up"
 
@@ -142,6 +142,6 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r tag; do
-            docker tag packet-browser:latest "$tag"
+            docker tag docker-packet-browser:latest "$tag"
             docker push "$tag"
           done

@@ -11,7 +11,7 @@ build:
 	$(NIX) build .#docker-image
 	docker load < result
 
-## Run smoke test against the already-loaded packet-browser:latest image
+## Run smoke test against the already-loaded docker-packet-browser:latest image
 smoke-test:
 	@echo "=== Smoke test: verifying Chromium starts and can load a page ==="
 	@mkdir -p /tmp/smoke-logs
@@ -28,7 +28,7 @@ smoke-test:
 	  -e DEBUG_MODE=true \
 	  -e BLOCKLIST_ENABLED=false \
 	  -e PORTAL_URL=https://example.com \
-	  packet-browser:latest
+	  docker-packet-browser:latest
 
 	@echo "Waiting for packet-browser to start..."
 	@timeout 30 bash -c 'until nc -z 127.0.0.1 63004 2>/dev/null; do sleep 1; done' \
@@ -76,4 +76,4 @@ all: test test-image
 install-hooks:
 	@cp scripts/pre-push .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push
-	@echo "Pre-push hook installed. 'make build' before pushing to populate packet-browser:latest."
+	@echo "Pre-push hook installed. 'make build' before pushing to populate docker-packet-browser:latest."
