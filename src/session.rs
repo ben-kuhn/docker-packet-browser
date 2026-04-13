@@ -16,7 +16,8 @@ pub struct Session {
     pub acknowledged: bool,
     pub current_url: Option<String>,
     pub previous_url: Option<String>,
-    pub links: Vec<(usize, String)>,
+    /// (index, url, link_text)
+    pub links: Vec<(usize, String, String)>,
     pub inputs: Vec<InputField>,
     pub page_content: Vec<String>,
     pub lines_per_page: usize,

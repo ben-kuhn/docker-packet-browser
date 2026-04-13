@@ -186,8 +186,12 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
             }
             Command::List => {
                 writeln!(stream, "\nAvailable links:")?;
-                for (idx, url) in &session.links {
-                    writeln!(stream, "[{}] {}", idx, url)?;
+                for (idx, url, text) in &session.links {
+                    if text.is_empty() {
+                        writeln!(stream, "[{}] {}", idx, url)?;
+                    } else {
+                        writeln!(stream, "[{}] {} ({})", idx, text, url)?;
+                    }
                 }
                 if session.links.is_empty() {
                     writeln!(stream, "No links on this page.")?;
@@ -214,7 +218,7 @@ fn handle_connection(mut stream: TcpStream, config: Arc<Config>) -> std::io::Res
                 }
             }
             Command::LoadLink(num) => {
-                if let Some((_, url)) = session.links.iter().find(|(idx, _)| *idx == num) {
+                if let Some((_, url, _)) = session.links.iter().find(|(idx, _, _)| *idx == num) {
                     let url = url.clone();
                     if let Err(e) = load_page(&mut session, &mut browser, &callsign, &config, &logger, &mut stream, &url) {
                         writeln!(stream, "Error loading link: {}", e)?;

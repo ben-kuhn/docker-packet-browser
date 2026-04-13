@@ -103,22 +103,23 @@ pub fn format_page_footer() -> &'static str {
 }
 
 /// Format a summary of available links for display below content.
-/// Shows first few links that fit, with numbers for easy navigation.
-pub fn format_links_summary(links: &[(usize, String)], max_links: usize) -> String {
+/// Shows first few links with descriptive text for easy navigation.
+pub fn format_links_summary(links: &[(usize, String, String)], max_links: usize) -> String {
     if links.is_empty() {
         return String::new();
     }
 
     let display_links: Vec<String> = links.iter()
         .take(max_links)
-        .map(|(idx, url)| {
-            // Truncate long URLs to fit in 80 columns
-            let truncated = if url.len() > 30 {
-                format!("{}...", &url[..27])
+        .map(|(idx, url, text)| {
+            // Prefer link text over URL for readability
+            let label = if !text.is_empty() {
+                truncate_str(text, 30)
             } else {
-                url.clone()
+                // Fall back to domain name from URL
+                extract_domain(url)
             };
-            format!("[{}]{}", idx, truncated)
+            format!("[{}]{}", idx, label)
         })
         .collect();
 
@@ -130,4 +131,15 @@ pub fn format_links_summary(links: &[(usize, String)], max_links: usize) -> Stri
     };
 
     format!("{}{}", summary, more)
+}
+
+/// Extract a readable domain from a URL for display when link text is unavailable.
+fn extract_domain(url: &str) -> String {
+    url.trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("www.")
+        .split('/')
+        .next()
+        .unwrap_or(url)
+        .to_string()
 }

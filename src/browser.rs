@@ -35,7 +35,8 @@ pub struct InputField {
 
 pub struct PageContent {
     pub text: Vec<String>,
-    pub links: Vec<(usize, String)>,
+    /// (index, url, link_text)
+    pub links: Vec<(usize, String, String)>,
     pub inputs: Vec<InputField>,
 }
 
@@ -366,6 +367,18 @@ const JS_EXTRACT_PAGE: &str = r#"
     // Clone the body so we can modify it without affecting the page
     var clone = document.body.cloneNode(true);
 
+    // Replace images with alt text or [image] placeholder
+    var cloneImages = clone.querySelectorAll('img');
+    for (var i = 0; i < cloneImages.length; i++) {
+        var img = cloneImages[i];
+        var alt = (img.getAttribute('alt') || '').trim();
+        var replacement = alt ? '[img: ' + alt + ']' : '[image]';
+        var textNode = document.createTextNode(replacement);
+        if (img.parentNode) {
+            img.parentNode.replaceChild(textNode, img);
+        }
+    }
+
     // Collect and mark links
     var links = [];
     var linkIndex = 1;
@@ -374,9 +387,10 @@ const JS_EXTRACT_PAGE: &str = r#"
         var a = cloneAnchors[i];
         var href = a.href;
         if (href && href.startsWith('http')) {
+            var linkText = (a.innerText || '').trim().substring(0, 60);
             var marker = '[' + linkIndex + ']';
             a.insertBefore(document.createTextNode(marker), a.firstChild);
-            links.push(href);
+            links.push({url: href, text: linkText});
             linkIndex++;
         }
     }
@@ -434,9 +448,16 @@ fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
 
     // Parse the JSON response
     #[derive(serde::Deserialize)]
+    struct LinkInfo {
+        url: String,
+        #[serde(default)]
+        text: String,
+    }
+
+    #[derive(serde::Deserialize)]
     struct ExtractResult {
         text: String,
-        links: Vec<String>,
+        links: Vec<LinkInfo>,
     }
 
     let extracted: ExtractResult = serde_json::from_str(&json_str)
@@ -444,10 +465,10 @@ fn extract_page_content(tab: &Arc<Tab>) -> Result<PageContent, BrowserError> {
 
     let text_lines: Vec<String> = extracted.text.lines().map(|l| l.to_string()).collect();
 
-    let links: Vec<(usize, String)> = extracted.links
+    let links: Vec<(usize, String, String)> = extracted.links
         .into_iter()
         .enumerate()
-        .map(|(i, url)| (i + 1, url))
+        .map(|(i, link)| (i + 1, link.url, link.text))
         .collect();
 
     // Extract input fields
