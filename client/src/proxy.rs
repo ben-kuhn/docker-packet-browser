@@ -237,8 +237,6 @@ async fn root_handler() -> impl IntoResponse {
 async fn connect_page_handler(
     Extension(ctx): Extension<Arc<AppContext>>,
 ) -> impl IntoResponse {
-    use crate::transport::{VaraParams, VaraMode, VaraBandwidth};
-
     let state = ctx.state.lock_or_poisoned();
     let my_callsign = state.config.my_callsign.clone();
     let target_callsign = state.config.target_callsign.clone();
@@ -254,24 +252,7 @@ async fn connect_page_handler(
     };
     let ports_json = serde_json::to_string(&state.available_ports).unwrap_or_else(|_| "[]".to_string());
     let transport_default = state.config.transport.default;
-    let vara_params = VaraParams {
-        cmd_host: state.config.vara.cmd_host.clone(),
-        cmd_port: state.config.vara.cmd_port,
-        data_host: state.config.vara.data_host.clone(),
-        data_port: state.config.vara.data_port,
-        mode: match state.config.vara.mode {
-            VaraMode::Fm => VaraMode::Fm,
-            VaraMode::Hf => VaraMode::Hf,
-        },
-        bandwidth: match state.config.vara.bandwidth {
-            VaraBandwidth::VNarrow => VaraBandwidth::VNarrow,
-            VaraBandwidth::VWide   => VaraBandwidth::VWide,
-            VaraBandwidth::Bw250   => VaraBandwidth::Bw250,
-            VaraBandwidth::Bw500   => VaraBandwidth::Bw500,
-            VaraBandwidth::Bw2300  => VaraBandwidth::Bw2300,
-            VaraBandwidth::Bw2750  => VaraBandwidth::Bw2750,
-        },
-    };
+    let vara = state.config.vara.clone();
     drop(state);
 
     Html(ui::connect_page(
@@ -281,7 +262,7 @@ async fn connect_page_handler(
         connection_state_class,
         &ports_json,
         transport_default,
-        &vara_params,
+        &vara,
     ))
 }
 
@@ -295,14 +276,7 @@ async fn configuration_page_handler(
     let target_callsign = state.config.target_callsign.clone();
     let bpq_command = state.config.bpq_command.clone();
     let skip_bpq_app = state.config.skip_bpq_app;
-    let vara = crate::transport::VaraParams {
-        cmd_host: state.config.vara.cmd_host.clone(),
-        cmd_port: state.config.vara.cmd_port,
-        data_host: state.config.vara.data_host.clone(),
-        data_port: state.config.vara.data_port,
-        mode: state.config.vara.mode,
-        bandwidth: state.config.vara.bandwidth,
-    };
+    let vara = state.config.vara.clone();
     drop(state);
 
     Html(ui::configuration_page(
@@ -650,19 +624,22 @@ async fn api_agwpe_status_post(
         });
     }
 
-    use crate::transport::{AgwpeParams, TransportConfig, TransportKind, VaraParams};
+    use crate::transport::{AgwpeParams, TransportConfig, TransportKind, VaraMode, VaraParams};
     let agwpe_cfg = {
         let s = ctx.state.lock_or_poisoned();
+        // TransportConfig requires a VaraParams field; for the AX.25 path it
+        // is unused, so send the HF endpoint as a formal placeholder.
+        let ep = &s.config.vara.hf;
         TransportConfig {
             kind: TransportKind::Ax25,
             agwpe: AgwpeParams { host, port },
             vara: VaraParams {
-                cmd_host: s.config.vara.cmd_host.clone(),
-                cmd_port: s.config.vara.cmd_port,
-                data_host: s.config.vara.data_host.clone(),
-                data_port: s.config.vara.data_port,
-                mode: s.config.vara.mode,
-                bandwidth: s.config.vara.bandwidth,
+                cmd_host: ep.cmd_host.clone(),
+                cmd_port: ep.cmd_port,
+                data_host: ep.data_host.clone(),
+                data_port: ep.data_port,
+                mode: VaraMode::Hf,
+                bandwidth: ep.bandwidth,
             },
             local_callsign: callsign,
         }
@@ -724,8 +701,10 @@ struct ConnectRequest {
     vara_data_host: Option<String>,
     #[serde(default)]
     vara_data_port: Option<u16>,
-    #[serde(default)]
-    vara_mode: Option<String>,
+    // Kept for wire compatibility with older clients; the mode is now derived
+    // from `transport` so this field is ignored on the server.
+    #[serde(default, rename = "vara_mode")]
+    _vara_mode: Option<String>,
     #[serde(default)]
     vara_bandwidth: Option<String>,
 }
@@ -741,7 +720,7 @@ async fn api_connect_handler(
     Extension(ctx): Extension<Arc<AppContext>>,
     Json(req): Json<ConnectRequest>,
 ) -> Json<ConnectResponse> {
-    use crate::transport::{TransportKind, VaraBandwidth, VaraMode};
+    use crate::transport::{TransportKind, VaraBandwidth};
 
     // Validate target callsign format
     let callsign = req.target_callsign.split('-').next().unwrap_or(&req.target_callsign);
@@ -770,26 +749,18 @@ async fn api_connect_handler(
     };
 
     // When a VARA transport is requested, spawn a new TransportManager backed
-    // by VaraTransport and replace the active one.  The operator must have
-    // already configured (or passed) VARA host/port parameters; if none are
-    // given we fall back to the configured defaults.
+    // by VaraTransport and replace the active one.  Per-mode endpoint settings
+    // come from `[vara_hf]` / `[vara_fm]`; request fields override them.
     match transport_kind {
         TransportKind::VaraFm | TransportKind::VaraHf => {
             let (vara_cfg, response_timeout_secs) = {
                 let s = ctx.state.lock_or_poisoned();
-                let cmd_host = req.vara_cmd_host.clone()
-                    .unwrap_or_else(|| s.config.vara.cmd_host.clone());
-                let cmd_port = req.vara_cmd_port.unwrap_or(s.config.vara.cmd_port);
-                let data_host = req.vara_data_host.clone()
-                    .unwrap_or_else(|| s.config.vara.data_host.clone());
-                let data_port = req.vara_data_port.unwrap_or(s.config.vara.data_port);
-                let vara_mode_val = match req.vara_mode.as_deref() {
-                    Some("hf") => VaraMode::Hf,
-                    _ => match s.config.vara.mode {
-                        VaraMode::Hf => VaraMode::Hf,
-                        VaraMode::Fm => VaraMode::Fm,
-                    },
-                };
+                // Safe: we've matched a VARA transport above.
+                let (ep, mode) = s.config.vara.for_transport(transport_kind).unwrap();
+                let cmd_host = req.vara_cmd_host.clone().unwrap_or_else(|| ep.cmd_host.clone());
+                let cmd_port = req.vara_cmd_port.unwrap_or(ep.cmd_port);
+                let data_host = req.vara_data_host.clone().unwrap_or_else(|| ep.data_host.clone());
+                let data_port = req.vara_data_port.unwrap_or(ep.data_port);
                 let vara_bw_val = match req.vara_bandwidth.as_deref() {
                     Some("vnarrow") => VaraBandwidth::VNarrow,
                     Some("bw250")   => VaraBandwidth::Bw250,
@@ -797,7 +768,7 @@ async fn api_connect_handler(
                     Some("bw2300")  => VaraBandwidth::Bw2300,
                     Some("bw2750")  => VaraBandwidth::Bw2750,
                     Some("vwide")   => VaraBandwidth::VWide,
-                    _ => s.config.vara.bandwidth,
+                    _ => ep.bandwidth,
                 };
                 let cfg = crate::transport::TransportConfig {
                     kind: transport_kind,
@@ -810,7 +781,7 @@ async fn api_connect_handler(
                         cmd_port,
                         data_host,
                         data_port,
-                        mode: vara_mode_val,
+                        mode,
                         bandwidth: vara_bw_val,
                     },
                     local_callsign: s.config.my_callsign.clone(),
@@ -999,6 +970,15 @@ async fn api_consent_post(
 }
 
 #[derive(Serialize)]
+struct VaraEndpointJson {
+    cmd_host: String,
+    cmd_port: u16,
+    data_host: String,
+    data_port: u16,
+    bandwidth: String,
+}
+
+#[derive(Serialize)]
 struct ConfigResponse {
     agwpe_host: String,
     agwpe_port: u16,
@@ -1006,12 +986,18 @@ struct ConfigResponse {
     target_callsign: String,
     bpq_command: String,
     skip_bpq_app: bool,
-    vara_cmd_host: String,
-    vara_cmd_port: u16,
-    vara_data_host: String,
-    vara_data_port: u16,
-    vara_mode: String,
-    vara_bandwidth: String,
+    vara_hf: VaraEndpointJson,
+    vara_fm: VaraEndpointJson,
+}
+
+fn vara_endpoint_to_json(ep: &crate::config::VaraEndpoint) -> VaraEndpointJson {
+    VaraEndpointJson {
+        cmd_host: ep.cmd_host.clone(),
+        cmd_port: ep.cmd_port,
+        data_host: ep.data_host.clone(),
+        data_port: ep.data_port,
+        bandwidth: ep.bandwidth.to_string(),
+    }
 }
 
 async fn api_config_get(
@@ -1025,13 +1011,18 @@ async fn api_config_get(
         target_callsign: state.config.target_callsign.clone(),
         bpq_command: state.config.bpq_command.clone(),
         skip_bpq_app: state.config.skip_bpq_app,
-        vara_cmd_host: state.config.vara.cmd_host.clone(),
-        vara_cmd_port: state.config.vara.cmd_port,
-        vara_data_host: state.config.vara.data_host.clone(),
-        vara_data_port: state.config.vara.data_port,
-        vara_mode: state.config.vara.mode.to_string(),
-        vara_bandwidth: state.config.vara.bandwidth.to_string(),
+        vara_hf: vara_endpoint_to_json(&state.config.vara.hf),
+        vara_fm: vara_endpoint_to_json(&state.config.vara.fm),
     })
+}
+
+#[derive(Deserialize, Default)]
+struct VaraEndpointUpdate {
+    cmd_host: Option<String>,
+    cmd_port: Option<u16>,
+    data_host: Option<String>,
+    data_port: Option<u16>,
+    bandwidth: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1042,12 +1033,30 @@ struct ConfigUpdate {
     target_callsign: Option<String>,
     bpq_command: Option<String>,
     skip_bpq_app: Option<bool>,
-    vara_cmd_host: Option<String>,
-    vara_cmd_port: Option<u16>,
-    vara_data_host: Option<String>,
-    vara_data_port: Option<u16>,
-    vara_mode: Option<String>,
-    vara_bandwidth: Option<String>,
+    #[serde(default)]
+    vara_hf: Option<VaraEndpointUpdate>,
+    #[serde(default)]
+    vara_fm: Option<VaraEndpointUpdate>,
+}
+
+fn parse_bandwidth(s: &str) -> crate::transport::VaraBandwidth {
+    use crate::transport::VaraBandwidth::*;
+    match s {
+        "vnarrow" => VNarrow,
+        "bw250"   => Bw250,
+        "bw500"   => Bw500,
+        "bw2300"  => Bw2300,
+        "bw2750"  => Bw2750,
+        _         => VWide,
+    }
+}
+
+fn apply_endpoint_update(ep: &mut crate::config::VaraEndpoint, update: VaraEndpointUpdate) {
+    if let Some(v) = update.cmd_host { ep.cmd_host = v; }
+    if let Some(v) = update.cmd_port { ep.cmd_port = v; }
+    if let Some(v) = update.data_host { ep.data_host = v; }
+    if let Some(v) = update.data_port { ep.data_port = v; }
+    if let Some(v) = update.bandwidth { ep.bandwidth = parse_bandwidth(&v); }
 }
 
 #[derive(Serialize)]
@@ -1093,33 +1102,11 @@ async fn api_config_post(
     if let Some(skip) = update.skip_bpq_app {
         config.skip_bpq_app = skip;
     }
-    if let Some(h) = update.vara_cmd_host {
-        config.vara.cmd_host = h;
+    if let Some(u) = update.vara_hf {
+        apply_endpoint_update(&mut config.vara.hf, u);
     }
-    if let Some(p) = update.vara_cmd_port {
-        config.vara.cmd_port = p;
-    }
-    if let Some(h) = update.vara_data_host {
-        config.vara.data_host = h;
-    }
-    if let Some(p) = update.vara_data_port {
-        config.vara.data_port = p;
-    }
-    if let Some(m) = update.vara_mode {
-        config.vara.mode = match m.as_str() {
-            "hf" => crate::transport::VaraMode::Hf,
-            _ => crate::transport::VaraMode::Fm,
-        };
-    }
-    if let Some(b) = update.vara_bandwidth {
-        config.vara.bandwidth = match b.as_str() {
-            "vnarrow" => crate::transport::VaraBandwidth::VNarrow,
-            "bw250"   => crate::transport::VaraBandwidth::Bw250,
-            "bw500"   => crate::transport::VaraBandwidth::Bw500,
-            "bw2300"  => crate::transport::VaraBandwidth::Bw2300,
-            "bw2750"  => crate::transport::VaraBandwidth::Bw2750,
-            _         => crate::transport::VaraBandwidth::VWide,
-        };
+    if let Some(u) = update.vara_fm {
+        apply_endpoint_update(&mut config.vara.fm, u);
     }
 
     match config.save(&path) {
@@ -1158,27 +1145,17 @@ async fn api_vara_test(
     Extension(ctx): Extension<Arc<AppContext>>,
     Json(req): Json<VaraTestRequest>,
 ) -> Json<VaraTestResponse> {
-    use crate::transport::{TransportConfig, TransportKind, VaraBandwidth, VaraMode};
+    use crate::transport::{TransportConfig, TransportKind, VaraMode};
 
-    let (mode, kind, default_bw) = match req.mode.as_deref() {
-        Some("fm") => (VaraMode::Fm, TransportKind::VaraFm, VaraBandwidth::VWide),
-        _          => (VaraMode::Hf, TransportKind::VaraHf, VaraBandwidth::Bw500),
+    let (mode, kind) = match req.mode.as_deref() {
+        Some("fm") => (VaraMode::Fm, TransportKind::VaraFm),
+        _          => (VaraMode::Hf, TransportKind::VaraHf),
     };
 
     let (cfg, response_timeout_secs) = {
         let s = ctx.state.lock_or_poisoned();
-        // Fall back to a mode-appropriate default if the stored bandwidth
-        // doesn't match the requested mode (e.g. configured Bw2300 but the
-        // user pressed the "Test VARA FM" button).
-        let stored_bw = s.config.vara.bandwidth;
-        let bandwidth = match (mode, stored_bw) {
-            (VaraMode::Fm, VaraBandwidth::VNarrow) | (VaraMode::Fm, VaraBandwidth::VWide) => stored_bw,
-            (VaraMode::Hf, VaraBandwidth::Bw250)
-            | (VaraMode::Hf, VaraBandwidth::Bw500)
-            | (VaraMode::Hf, VaraBandwidth::Bw2300)
-            | (VaraMode::Hf, VaraBandwidth::Bw2750) => stored_bw,
-            _ => default_bw,
-        };
+        // Test uses the [vara_hf] or [vara_fm] endpoint that matches the button.
+        let (ep, _) = s.config.vara.for_transport(kind).unwrap();
         let cfg = TransportConfig {
             kind,
             agwpe: crate::transport::AgwpeParams {
@@ -1186,12 +1163,12 @@ async fn api_vara_test(
                 port: s.config.agwpe_port,
             },
             vara: crate::transport::VaraParams {
-                cmd_host: s.config.vara.cmd_host.clone(),
-                cmd_port: s.config.vara.cmd_port,
-                data_host: s.config.vara.data_host.clone(),
-                data_port: s.config.vara.data_port,
+                cmd_host: ep.cmd_host.clone(),
+                cmd_port: ep.cmd_port,
+                data_host: ep.data_host.clone(),
+                data_port: ep.data_port,
                 mode,
-                bandwidth,
+                bandwidth: ep.bandwidth,
             },
             local_callsign: s.config.my_callsign.clone(),
         };
@@ -1240,42 +1217,20 @@ struct StateResponse {
     agwpe_host: String,
     agwpe_port: u16,
     transport: String,
-    vara_cmd_host: String,
-    vara_cmd_port: u16,
-    vara_data_host: String,
-    vara_data_port: u16,
-    vara_mode: String,
-    vara_bandwidth: String,
+    vara_hf: VaraEndpointJson,
+    vara_fm: VaraEndpointJson,
 }
 
 async fn api_state_get(
     Extension(ctx): Extension<Arc<AppContext>>,
 ) -> Json<StateResponse> {
-    use crate::transport::{VaraBandwidth, VaraMode};
-
     let state = ctx.state.lock_or_poisoned();
-    let vara_mode = match state.config.vara.mode {
-        VaraMode::Fm => "fm".to_string(),
-        VaraMode::Hf => "hf".to_string(),
-    };
-    let vara_bandwidth = match state.config.vara.bandwidth {
-        VaraBandwidth::VNarrow => "vnarrow".to_string(),
-        VaraBandwidth::VWide   => "vwide".to_string(),
-        VaraBandwidth::Bw250   => "bw250".to_string(),
-        VaraBandwidth::Bw500   => "bw500".to_string(),
-        VaraBandwidth::Bw2300  => "bw2300".to_string(),
-        VaraBandwidth::Bw2750  => "bw2750".to_string(),
-    };
     Json(StateResponse {
         agwpe_host: state.config.agwpe_host.clone(),
         agwpe_port: state.config.agwpe_port,
         transport: state.config.transport.default.to_string(),
-        vara_cmd_host: state.config.vara.cmd_host.clone(),
-        vara_cmd_port: state.config.vara.cmd_port,
-        vara_data_host: state.config.vara.data_host.clone(),
-        vara_data_port: state.config.vara.data_port,
-        vara_mode,
-        vara_bandwidth,
+        vara_hf: vara_endpoint_to_json(&state.config.vara.hf),
+        vara_fm: vara_endpoint_to_json(&state.config.vara.fm),
     })
 }
 

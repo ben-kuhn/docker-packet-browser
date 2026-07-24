@@ -204,9 +204,9 @@ pub fn connect_page(
     connection_state_class: &str,
     ports_json: &str,
     transport_default: crate::transport::TransportKind,
-    vara_params: &crate::transport::VaraParams,
+    vara: &crate::config::VaraSection,
 ) -> String {
-    use crate::transport::TransportKind;
+    use crate::transport::{TransportKind, VaraBandwidth};
 
     let ax25_hidden = if transport_default == TransportKind::Ax25 { "" } else { " hidden" };
     let vara_hidden = if transport_default != TransportKind::Ax25 { "" } else { " hidden" };
@@ -215,17 +215,41 @@ pub fn connect_page(
     let vara_fm_selected = if transport_default == TransportKind::VaraFm  { " selected" } else { "" };
     let vara_hf_selected = if transport_default == TransportKind::VaraHf  { " selected" } else { "" };
 
-    let vara_cmd_host  = h(&vara_params.cmd_host);
-    let vara_cmd_port  = vara_params.cmd_port;
-    let vara_data_host = h(&vara_params.data_host);
-    let vara_data_port = vara_params.data_port;
+    // Initial form values: use FM endpoint by default (matches the dropdown
+    // default when nothing else is set); the JS swaps to HF on selection.
+    let initial_ep = match transport_default {
+        TransportKind::VaraHf => &vara.hf,
+        _ => &vara.fm,
+    };
+    let vara_cmd_host  = h(&initial_ep.cmd_host);
+    let vara_cmd_port  = initial_ep.cmd_port;
+    let vara_data_host = h(&initial_ep.data_host);
+    let vara_data_port = initial_ep.data_port;
 
-    let vara_bw_vnarrow_sel = if vara_params.bandwidth == crate::transport::VaraBandwidth::VNarrow { " selected" } else { "" };
-    let vara_bw_vwide_sel   = if vara_params.bandwidth == crate::transport::VaraBandwidth::VWide   { " selected" } else { "" };
-    let vara_bw_250_sel     = if vara_params.bandwidth == crate::transport::VaraBandwidth::Bw250   { " selected" } else { "" };
-    let vara_bw_500_sel     = if vara_params.bandwidth == crate::transport::VaraBandwidth::Bw500   { " selected" } else { "" };
-    let vara_bw_2300_sel    = if vara_params.bandwidth == crate::transport::VaraBandwidth::Bw2300  { " selected" } else { "" };
-    let vara_bw_2750_sel    = if vara_params.bandwidth == crate::transport::VaraBandwidth::Bw2750  { " selected" } else { "" };
+    let vara_bw_vnarrow_sel = if initial_ep.bandwidth == VaraBandwidth::VNarrow { " selected" } else { "" };
+    let vara_bw_vwide_sel   = if initial_ep.bandwidth == VaraBandwidth::VWide   { " selected" } else { "" };
+    let vara_bw_250_sel     = if initial_ep.bandwidth == VaraBandwidth::Bw250   { " selected" } else { "" };
+    let vara_bw_500_sel     = if initial_ep.bandwidth == VaraBandwidth::Bw500   { " selected" } else { "" };
+    let vara_bw_2300_sel    = if initial_ep.bandwidth == VaraBandwidth::Bw2300  { " selected" } else { "" };
+    let vara_bw_2750_sel    = if initial_ep.bandwidth == VaraBandwidth::Bw2750  { " selected" } else { "" };
+
+    // Serialize both endpoints for the JS swap-on-mode-change handler.
+    let endpoint_json = |ep: &crate::config::VaraEndpoint| {
+        serde_json::json!({
+            "cmd_host": ep.cmd_host,
+            "cmd_port": ep.cmd_port,
+            "data_host": ep.data_host,
+            "data_port": ep.data_port,
+            "bandwidth": ep.bandwidth.to_string(),
+        })
+    };
+    let vara_endpoints_json = json_for_script(
+        &serde_json::json!({
+            "vara_hf": endpoint_json(&vara.hf),
+            "vara_fm": endpoint_json(&vara.fm),
+        })
+        .to_string(),
+    );
 
     format!(
         r#"<!DOCTYPE html>
@@ -343,6 +367,14 @@ pub fn connect_page(
             <button onclick="clearLogs()">Clear</button>
         </div>
         <div id="debug-log" class="debug-log"></div>
+    </div>
+
+    <div class="card">
+        <h2>Server</h2>
+        <p><small>Cleanly disconnect the modem and stop the local proxy. You'll need to relaunch the client to browse again.</small></p>
+        <div class="btn-row">
+            <button class="danger" onclick="shutdownServer()">Shutdown Server</button>
+        </div>
     </div>
 
     <script>
@@ -509,6 +541,20 @@ pub fn connect_page(
             }}
         }}
 
+        async function shutdownServer() {{
+            if (!confirm('Shut down the packet-browser client? You will need to relaunch it to browse again.')) return;
+            try {{
+                await fetch('/api/shutdown', {{ method: 'POST' }});
+                document.body.innerHTML =
+                    '<div style="max-width:600px;margin:6em auto;padding:2em;text-align:center;font-family:sans-serif;">' +
+                    '<h1>Server shutting down</h1>' +
+                    '<p>You can close this tab.</p>' +
+                    '</div>';
+            }} catch (e) {{
+                showMsg('Shutdown request failed: ' + e.message, true);
+            }}
+        }}
+
         function addLogEntry(entry) {{
             logEntries.push(entry);
             if (logEntries.length > 1000) logEntries.shift();
@@ -546,6 +592,8 @@ pub fn connect_page(
             return d.innerHTML;
         }}
 
+        const VARA_ENDPOINTS = {vara_endpoints_json};
+
         function onTransportChange() {{
             const t = document.getElementById('transport').value;
             const ax25Fields = document.getElementById('ax25-fields');
@@ -556,6 +604,16 @@ pub fn connect_page(
             }} else {{
                 ax25Fields.setAttribute('hidden', '');
                 varaFields.removeAttribute('hidden');
+                // Swap host/port/bandwidth to the endpoint that matches the
+                // chosen VARA mode ([vara_hf] vs [vara_fm] in the config).
+                const ep = VARA_ENDPOINTS[t];
+                if (ep) {{
+                    document.getElementById('vara-cmd-host').value  = ep.cmd_host;
+                    document.getElementById('vara-cmd-port').value  = ep.cmd_port;
+                    document.getElementById('vara-data-host').value = ep.data_host;
+                    document.getElementById('vara-data-port').value = ep.data_port;
+                    document.getElementById('vara-bandwidth').value = ep.bandwidth;
+                }}
             }}
         }}
 
@@ -616,6 +674,7 @@ pub fn connect_page(
         vara_bw_500_sel = vara_bw_500_sel,
         vara_bw_2300_sel = vara_bw_2300_sel,
         vara_bw_2750_sel = vara_bw_2750_sel,
+        vara_endpoints_json = vara_endpoints_json,
     )
 }
 
@@ -626,24 +685,25 @@ pub fn configuration_page(
     target_callsign: &str,
     bpq_command: &str,
     skip_bpq_app: bool,
-    vara_params: &crate::transport::VaraParams,
+    vara: &crate::config::VaraSection,
 ) -> String {
-    use crate::transport::{VaraBandwidth, VaraMode};
+    use crate::transport::VaraBandwidth;
 
-    let vara_cmd_host  = h(&vara_params.cmd_host);
-    let vara_cmd_port  = vara_params.cmd_port;
-    let vara_data_host = h(&vara_params.data_host);
-    let vara_data_port = vara_params.data_port;
+    let hf_cmd_host  = h(&vara.hf.cmd_host);
+    let hf_cmd_port  = vara.hf.cmd_port;
+    let hf_data_host = h(&vara.hf.data_host);
+    let hf_data_port = vara.hf.data_port;
+    let hf_bw_250_sel  = if vara.hf.bandwidth == VaraBandwidth::Bw250  { " selected" } else { "" };
+    let hf_bw_500_sel  = if vara.hf.bandwidth == VaraBandwidth::Bw500  { " selected" } else { "" };
+    let hf_bw_2300_sel = if vara.hf.bandwidth == VaraBandwidth::Bw2300 { " selected" } else { "" };
+    let hf_bw_2750_sel = if vara.hf.bandwidth == VaraBandwidth::Bw2750 { " selected" } else { "" };
 
-    let vara_mode_fm_sel = if vara_params.mode == VaraMode::Fm { " selected" } else { "" };
-    let vara_mode_hf_sel = if vara_params.mode == VaraMode::Hf { " selected" } else { "" };
-
-    let vara_bw_vnarrow_sel = if vara_params.bandwidth == VaraBandwidth::VNarrow { " selected" } else { "" };
-    let vara_bw_vwide_sel   = if vara_params.bandwidth == VaraBandwidth::VWide   { " selected" } else { "" };
-    let vara_bw_250_sel     = if vara_params.bandwidth == VaraBandwidth::Bw250   { " selected" } else { "" };
-    let vara_bw_500_sel     = if vara_params.bandwidth == VaraBandwidth::Bw500   { " selected" } else { "" };
-    let vara_bw_2300_sel    = if vara_params.bandwidth == VaraBandwidth::Bw2300  { " selected" } else { "" };
-    let vara_bw_2750_sel    = if vara_params.bandwidth == VaraBandwidth::Bw2750  { " selected" } else { "" };
+    let fm_cmd_host  = h(&vara.fm.cmd_host);
+    let fm_cmd_port  = vara.fm.cmd_port;
+    let fm_data_host = h(&vara.fm.data_host);
+    let fm_data_port = vara.fm.data_port;
+    let fm_bw_vnarrow_sel = if vara.fm.bandwidth == VaraBandwidth::VNarrow { " selected" } else { "" };
+    let fm_bw_vwide_sel   = if vara.fm.bandwidth == VaraBandwidth::VWide   { " selected" } else { "" };
 
     format!(
         r#"<!DOCTYPE html>
@@ -709,56 +769,82 @@ pub fn configuration_page(
 
         <div class="btn-row">
             <button class="primary" onclick="saveConfig()">Save Configuration</button>
+            <button onclick="testAgwpe()">Test AGWPE Connection</button>
         </div>
     </div>
 
     <div class="card">
-        <h2>VARA Settings</h2>
-        <p><small>Applies to VARA HF / Mercury and VARA FM modems.</small></p>
+        <h2>VARA HF / Mercury Settings</h2>
+        <p><small>Endpoint for a VARA HF or Mercury modem. Common default: 8300 / 8301.</small></p>
 
         <div class="form-group">
-            <label for="vara-cmd-host">VARA Command Host</label>
-            <input type="text" id="vara-cmd-host" value="{vara_cmd_host}" placeholder="127.0.0.1" autocomplete="off">
+            <label for="vara-hf-cmd-host">Command Host</label>
+            <input type="text" id="vara-hf-cmd-host" value="{hf_cmd_host}" placeholder="127.0.0.1" autocomplete="off">
         </div>
 
         <div class="form-group">
-            <label for="vara-cmd-port">VARA Command Port</label>
-            <input type="number" id="vara-cmd-port" value="{vara_cmd_port}" min="1" max="65535">
+            <label for="vara-hf-cmd-port">Command Port</label>
+            <input type="number" id="vara-hf-cmd-port" value="{hf_cmd_port}" min="1" max="65535">
         </div>
 
         <div class="form-group">
-            <label for="vara-data-host">VARA Data Host</label>
-            <input type="text" id="vara-data-host" value="{vara_data_host}" placeholder="127.0.0.1" autocomplete="off">
+            <label for="vara-hf-data-host">Data Host</label>
+            <input type="text" id="vara-hf-data-host" value="{hf_data_host}" placeholder="127.0.0.1" autocomplete="off">
         </div>
 
         <div class="form-group">
-            <label for="vara-data-port">VARA Data Port</label>
-            <input type="number" id="vara-data-port" value="{vara_data_port}" min="1" max="65535">
+            <label for="vara-hf-data-port">Data Port</label>
+            <input type="number" id="vara-hf-data-port" value="{hf_data_port}" min="1" max="65535">
         </div>
 
         <div class="form-group">
-            <label for="vara-mode">Default Mode</label>
-            <select id="vara-mode">
-                <option value="fm"{vara_mode_fm_sel}>FM</option>
-                <option value="hf"{vara_mode_hf_sel}>HF (VARA HF / Mercury)</option>
-            </select>
-        </div>
-
-        <div class="form-group">
-            <label for="vara-bandwidth">Default Bandwidth</label>
-            <select id="vara-bandwidth">
-                <option value="vnarrow"{vara_bw_vnarrow_sel}>VNarrow</option>
-                <option value="vwide"{vara_bw_vwide_sel}>VWide</option>
-                <option value="bw250"{vara_bw_250_sel}>BW250</option>
-                <option value="bw500"{vara_bw_500_sel}>BW500</option>
-                <option value="bw2300"{vara_bw_2300_sel}>BW2300</option>
-                <option value="bw2750"{vara_bw_2750_sel}>BW2750</option>
+            <label for="vara-hf-bandwidth">Bandwidth</label>
+            <select id="vara-hf-bandwidth">
+                <option value="bw250"{hf_bw_250_sel}>BW250</option>
+                <option value="bw500"{hf_bw_500_sel}>BW500</option>
+                <option value="bw2300"{hf_bw_2300_sel}>BW2300</option>
+                <option value="bw2750"{hf_bw_2750_sel}>BW2750</option>
             </select>
         </div>
 
         <div class="btn-row">
-            <button onclick="testAgwpe()">Test AGWPE Connection</button>
             <button onclick="testVara('hf')">Test VARA / Mercury Connection</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>VARA FM Settings</h2>
+        <p><small>Endpoint for a VARA FM modem. Common default: 8400 / 8401 (may differ from HF/Mercury).</small></p>
+
+        <div class="form-group">
+            <label for="vara-fm-cmd-host">Command Host</label>
+            <input type="text" id="vara-fm-cmd-host" value="{fm_cmd_host}" placeholder="127.0.0.1" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-fm-cmd-port">Command Port</label>
+            <input type="number" id="vara-fm-cmd-port" value="{fm_cmd_port}" min="1" max="65535">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-fm-data-host">Data Host</label>
+            <input type="text" id="vara-fm-data-host" value="{fm_data_host}" placeholder="127.0.0.1" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-fm-data-port">Data Port</label>
+            <input type="number" id="vara-fm-data-port" value="{fm_data_port}" min="1" max="65535">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-fm-bandwidth">Bandwidth</label>
+            <select id="vara-fm-bandwidth">
+                <option value="vnarrow"{fm_bw_vnarrow_sel}>VNarrow</option>
+                <option value="vwide"{fm_bw_vwide_sel}>VWide</option>
+            </select>
+        </div>
+
+        <div class="btn-row">
             <button onclick="testVara('fm')">Test VARA FM Connection</button>
         </div>
     </div>
@@ -783,6 +869,33 @@ pub fn configuration_page(
             document.getElementById('bpq-command-group').style.display = skipped ? 'none' : '';
         }}
 
+        function fillEndpoint(prefix, ep) {{
+            if (!ep) return;
+            document.getElementById(prefix + '-cmd-host').value  = ep.cmd_host  || '127.0.0.1';
+            document.getElementById(prefix + '-cmd-port').value  = ep.cmd_port  || '';
+            document.getElementById(prefix + '-data-host').value = ep.data_host || '127.0.0.1';
+            document.getElementById(prefix + '-data-port').value = ep.data_port || '';
+            if (ep.bandwidth) document.getElementById(prefix + '-bandwidth').value = ep.bandwidth;
+        }}
+
+        function readEndpoint(prefix) {{
+            return {{
+                cmd_host:  document.getElementById(prefix + '-cmd-host').value.trim(),
+                cmd_port:  parseInt(document.getElementById(prefix + '-cmd-port').value),
+                data_host: document.getElementById(prefix + '-data-host').value.trim(),
+                data_port: parseInt(document.getElementById(prefix + '-data-port').value),
+                bandwidth: document.getElementById(prefix + '-bandwidth').value,
+            }};
+        }}
+
+        function validateEndpoint(ep, label) {{
+            if (!ep.cmd_host)  {{ showMsg(label + ' Command Host is required', true); return false; }}
+            if (!ep.cmd_port || ep.cmd_port < 1 || ep.cmd_port > 65535) {{ showMsg('Invalid ' + label + ' command port', true); return false; }}
+            if (!ep.data_host) {{ showMsg(label + ' Data Host is required', true); return false; }}
+            if (!ep.data_port || ep.data_port < 1 || ep.data_port > 65535) {{ showMsg('Invalid ' + label + ' data port', true); return false; }}
+            return true;
+        }}
+
         async function loadConfig() {{
             try {{
                 const resp = await fetch('/api/config');
@@ -793,12 +906,8 @@ pub fn configuration_page(
                 document.getElementById('target-callsign').value = data.target_callsign || '';
                 document.getElementById('bpq-command').value = data.bpq_command || 'WEB';
                 document.getElementById('skip-bpq-app').checked = data.skip_bpq_app || false;
-                document.getElementById('vara-cmd-host').value = data.vara_cmd_host || '127.0.0.1';
-                document.getElementById('vara-cmd-port').value = data.vara_cmd_port || 8300;
-                document.getElementById('vara-data-host').value = data.vara_data_host || '127.0.0.1';
-                document.getElementById('vara-data-port').value = data.vara_data_port || 8301;
-                if (data.vara_mode)      document.getElementById('vara-mode').value = data.vara_mode;
-                if (data.vara_bandwidth) document.getElementById('vara-bandwidth').value = data.vara_bandwidth;
+                fillEndpoint('vara-hf', data.vara_hf);
+                fillEndpoint('vara-fm', data.vara_fm);
                 updateBpqCommandVisibility();
             }} catch (e) {{
                 showMsg('Failed to load config: ' + e.message, true);
@@ -813,20 +922,14 @@ pub fn configuration_page(
             const bpqCommand = document.getElementById('bpq-command').value.trim();
             const skipBpqApp = document.getElementById('skip-bpq-app').checked;
 
-            const varaCmdHost  = document.getElementById('vara-cmd-host').value.trim();
-            const varaCmdPort  = parseInt(document.getElementById('vara-cmd-port').value);
-            const varaDataHost = document.getElementById('vara-data-host').value.trim();
-            const varaDataPort = parseInt(document.getElementById('vara-data-port').value);
-            const varaMode     = document.getElementById('vara-mode').value;
-            const varaBw       = document.getElementById('vara-bandwidth').value;
+            const hfEp = readEndpoint('vara-hf');
+            const fmEp = readEndpoint('vara-fm');
 
             if (!host) {{ showMsg('AGWPE Host is required', true); return; }}
             if (!port || port < 1 || port > 65535) {{ showMsg('Invalid AGWPE port', true); return; }}
             if (!myCallsign) {{ showMsg('My Callsign is required', true); return; }}
-            if (!varaCmdHost) {{ showMsg('VARA Command Host is required', true); return; }}
-            if (!varaCmdPort || varaCmdPort < 1 || varaCmdPort > 65535) {{ showMsg('Invalid VARA command port', true); return; }}
-            if (!varaDataHost) {{ showMsg('VARA Data Host is required', true); return; }}
-            if (!varaDataPort || varaDataPort < 1 || varaDataPort > 65535) {{ showMsg('Invalid VARA data port', true); return; }}
+            if (!validateEndpoint(hfEp, 'VARA HF / Mercury')) return;
+            if (!validateEndpoint(fmEp, 'VARA FM')) return;
 
             try {{
                 const resp = await fetch('/api/config', {{
@@ -839,12 +942,8 @@ pub fn configuration_page(
                         target_callsign: targetCallsign,
                         bpq_command: bpqCommand,
                         skip_bpq_app: skipBpqApp,
-                        vara_cmd_host: varaCmdHost,
-                        vara_cmd_port: varaCmdPort,
-                        vara_data_host: varaDataHost,
-                        vara_data_port: varaDataPort,
-                        vara_mode: varaMode,
-                        vara_bandwidth: varaBw
+                        vara_hf: hfEp,
+                        vara_fm: fmEp,
                     }})
                 }});
                 const data = await resp.json();
@@ -916,18 +1015,20 @@ pub fn configuration_page(
         target_callsign = h(target_callsign),
         bpq_command = h(bpq_command),
         skip_checked = if skip_bpq_app { "checked" } else { "" },
-        vara_cmd_host = vara_cmd_host,
-        vara_cmd_port = vara_cmd_port,
-        vara_data_host = vara_data_host,
-        vara_data_port = vara_data_port,
-        vara_mode_fm_sel = vara_mode_fm_sel,
-        vara_mode_hf_sel = vara_mode_hf_sel,
-        vara_bw_vnarrow_sel = vara_bw_vnarrow_sel,
-        vara_bw_vwide_sel = vara_bw_vwide_sel,
-        vara_bw_250_sel = vara_bw_250_sel,
-        vara_bw_500_sel = vara_bw_500_sel,
-        vara_bw_2300_sel = vara_bw_2300_sel,
-        vara_bw_2750_sel = vara_bw_2750_sel,
+        hf_cmd_host = hf_cmd_host,
+        hf_cmd_port = hf_cmd_port,
+        hf_data_host = hf_data_host,
+        hf_data_port = hf_data_port,
+        hf_bw_250_sel = hf_bw_250_sel,
+        hf_bw_500_sel = hf_bw_500_sel,
+        hf_bw_2300_sel = hf_bw_2300_sel,
+        hf_bw_2750_sel = hf_bw_2750_sel,
+        fm_cmd_host = fm_cmd_host,
+        fm_cmd_port = fm_cmd_port,
+        fm_data_host = fm_data_host,
+        fm_data_port = fm_data_port,
+        fm_bw_vnarrow_sel = fm_bw_vnarrow_sel,
+        fm_bw_vwide_sel = fm_bw_vwide_sel,
     )
 }
 
@@ -1133,31 +1234,47 @@ mod tests {
 
     #[test]
     fn connect_page_renders_transport_dropdown_with_defaults() {
-        use crate::transport::{TransportKind, VaraParams, VaraMode, VaraBandwidth};
+        use crate::config::{VaraEndpoint, VaraSection};
+        use crate::transport::{TransportKind, VaraBandwidth};
 
-        let html = connect_page(
-            "W1TEST",
-            "N0CALL-8",
-            "AGWPE Connected",
-            "status-connected",
-            "[]",
-            TransportKind::VaraFm,
-            &VaraParams {
+        let vara = VaraSection {
+            hf: VaraEndpoint {
                 cmd_host: "10.0.0.5".into(),
                 cmd_port: 8300,
                 data_host: "10.0.0.5".into(),
                 data_port: 8301,
-                mode: VaraMode::Fm,
+                bandwidth: VaraBandwidth::Bw500,
+            },
+            fm: VaraEndpoint {
+                cmd_host: "10.0.0.6".into(),
+                cmd_port: 8400,
+                data_host: "10.0.0.6".into(),
+                data_port: 8401,
                 bandwidth: VaraBandwidth::VWide,
             },
+        };
+
+        let html = connect_page(
+            "W1TEST",
+            "N0CALL-8",
+            "Modem Connected",
+            "status-modem-connected",
+            "[]",
+            TransportKind::VaraFm,
+            &vara,
         );
 
         assert!(html.contains("<select id=\"transport\""));
         assert!(html.contains("value=\"ax25\""));
         assert!(html.contains("value=\"vara_fm\" selected"));
-        assert!(html.contains("value=\"vara_hf\""));
+        assert!(html.contains("VARA HF / Mercury"));
         assert!(html.contains("id=\"vara-cmd-host\""));
-        assert!(html.contains("value=\"10.0.0.5\""));
+        // Initial values come from the FM endpoint because transport_default = VaraFm.
+        assert!(html.contains("value=\"10.0.0.6\""));
+        // JS swap table contains both endpoints.
+        assert!(html.contains("VARA_ENDPOINTS"));
+        assert!(html.contains("\"vara_hf\""));
+        assert!(html.contains("\"vara_fm\""));
     }
 
     #[test]

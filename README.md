@@ -679,7 +679,7 @@ The client opens the default browser to `http://localhost:8088/connect` on start
 **Configuration Page** (`/configuration`):
 - AGWPE host/port
 - Callsign and BPQ session settings
-- VARA host/port + default mode and bandwidth (used for both VARA HF/Mercury and VARA FM)
+- Independent VARA HF / Mercury endpoint (host/port/bandwidth) and VARA FM endpoint (host/port/bandwidth) — supports operators running both modems concurrently on the same host with different port pairs
 - "Test AGWPE Connection", "Test VARA / Mercury Connection", and "Test VARA FM Connection" buttons
 - Save configuration to file
 - Shutdown button — cleanly disconnects the modem and stops the local proxy

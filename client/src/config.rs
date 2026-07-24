@@ -4,6 +4,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 use crate::transport::{TransportKind, VaraBandwidth, VaraMode};
 
+/// The two RF-mode-specific bandwidth defaults. VARA HF/Mercury typically
+/// runs one of the Bw* variants; VARA FM uses V(N|W)arrow.
+const DEFAULT_HF_BW: VaraBandwidth = VaraBandwidth::Bw500;
+const DEFAULT_FM_BW: VaraBandwidth = VaraBandwidth::VWide;
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("IO error: {0}")]
@@ -69,33 +74,102 @@ impl Default for TransportSection {
     }
 }
 
+/// One VARA modem endpoint — the network settings needed to talk to a single
+/// running VARA HF/Mercury or VARA FM instance. `[vara_hf]` and `[vara_fm]`
+/// each deserialize into one of these.
 #[derive(Debug, Clone)]
-pub struct VaraSection {
+pub struct VaraEndpoint {
     pub cmd_host: String,
     pub cmd_port: u16,
     pub data_host: String,
     pub data_port: u16,
-    pub mode: VaraMode,
     pub bandwidth: VaraBandwidth,
 }
 
-impl Default for VaraSection {
-    fn default() -> Self {
+impl VaraEndpoint {
+    fn default_hf() -> Self {
         Self {
             cmd_host: "127.0.0.1".to_string(),
             cmd_port: 8300,
             data_host: "127.0.0.1".to_string(),
             data_port: 8301,
-            mode: VaraMode::Fm,
-            bandwidth: VaraBandwidth::VWide,
+            bandwidth: DEFAULT_HF_BW,
+        }
+    }
+
+    fn default_fm() -> Self {
+        Self {
+            cmd_host: "127.0.0.1".to_string(),
+            cmd_port: 8400,
+            data_host: "127.0.0.1".to_string(),
+            data_port: 8401,
+            bandwidth: DEFAULT_FM_BW,
         }
     }
 }
 
-fn parse_vara_mode(s: &str) -> VaraMode {
-    match s {
-        "hf" => VaraMode::Hf,
-        _ => VaraMode::Fm,
+/// Holds both VARA endpoints. Operators commonly run VARA HF/Mercury and
+/// VARA FM on the same host but on different TCP port pairs, so we keep them
+/// entirely independent.
+#[derive(Debug, Clone)]
+pub struct VaraSection {
+    pub hf: VaraEndpoint,
+    pub fm: VaraEndpoint,
+}
+
+impl VaraSection {
+    /// Return the endpoint that matches the requested VARA mode.
+    pub fn for_mode(&self, mode: VaraMode) -> &VaraEndpoint {
+        match mode {
+            VaraMode::Hf => &self.hf,
+            VaraMode::Fm => &self.fm,
+        }
+    }
+
+    /// Same as [`for_mode`] but keyed off the transport kind. AX.25 has no
+    /// VARA endpoint; callers must not invoke this for `TransportKind::Ax25`.
+    pub fn for_transport(&self, kind: TransportKind) -> Option<(&VaraEndpoint, VaraMode)> {
+        match kind {
+            TransportKind::VaraHf => Some((&self.hf, VaraMode::Hf)),
+            TransportKind::VaraFm => Some((&self.fm, VaraMode::Fm)),
+            TransportKind::Ax25 => None,
+        }
+    }
+}
+
+impl Default for VaraSection {
+    fn default() -> Self {
+        Self {
+            hf: VaraEndpoint::default_hf(),
+            fm: VaraEndpoint::default_fm(),
+        }
+    }
+}
+
+fn save_vara_endpoint(ini: &mut Ini, section: &str, ep: &VaraEndpoint) {
+    ini.set(section, "cmd_host", Some(ep.cmd_host.clone()));
+    ini.set(section, "cmd_port", Some(ep.cmd_port.to_string()));
+    ini.set(section, "data_host", Some(ep.data_host.clone()));
+    ini.set(section, "data_port", Some(ep.data_port.to_string()));
+    ini.set(section, "bandwidth", Some(ep.bandwidth.to_string()));
+}
+
+fn load_vara_endpoint(ini: &Ini, section: &str, defaults: VaraEndpoint) -> VaraEndpoint {
+    VaraEndpoint {
+        cmd_host: ini.get(section, "cmd_host").unwrap_or(defaults.cmd_host),
+        cmd_port: ini
+            .get(section, "cmd_port")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(defaults.cmd_port),
+        data_host: ini.get(section, "data_host").unwrap_or(defaults.data_host),
+        data_port: ini
+            .get(section, "data_port")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(defaults.data_port),
+        bandwidth: ini
+            .get(section, "bandwidth")
+            .map(|v| parse_vara_bandwidth(&v))
+            .unwrap_or(defaults.bandwidth),
     }
 }
 
@@ -214,28 +288,8 @@ impl FileConfig {
             .unwrap_or(TransportKind::Ax25);
 
         let vara = VaraSection {
-            cmd_host: ini
-                .get("vara", "cmd_host")
-                .unwrap_or_else(|| "127.0.0.1".to_string()),
-            cmd_port: ini
-                .get("vara", "cmd_port")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(8300),
-            data_host: ini
-                .get("vara", "data_host")
-                .unwrap_or_else(|| "127.0.0.1".to_string()),
-            data_port: ini
-                .get("vara", "data_port")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(8301),
-            mode: ini
-                .get("vara", "mode")
-                .map(|v| parse_vara_mode(&v))
-                .unwrap_or(VaraMode::Fm),
-            bandwidth: ini
-                .get("vara", "bandwidth")
-                .map(|v| parse_vara_bandwidth(&v))
-                .unwrap_or(VaraBandwidth::VWide),
+            hf: load_vara_endpoint(&ini, "vara_hf", VaraEndpoint::default_hf()),
+            fm: load_vara_endpoint(&ini, "vara_fm", VaraEndpoint::default_fm()),
         };
 
         let transport = TransportSection { default: transport_default };
@@ -288,12 +342,8 @@ impl FileConfig {
 
         ini.set("transport", "default", Some(self.transport.default.to_string()));
 
-        ini.set("vara", "cmd_host", Some(self.vara.cmd_host.clone()));
-        ini.set("vara", "cmd_port", Some(self.vara.cmd_port.to_string()));
-        ini.set("vara", "data_host", Some(self.vara.data_host.clone()));
-        ini.set("vara", "data_port", Some(self.vara.data_port.to_string()));
-        ini.set("vara", "mode", Some(self.vara.mode.to_string()));
-        ini.set("vara", "bandwidth", Some(self.vara.bandwidth.to_string()));
+        save_vara_endpoint(&mut ini, "vara_hf", &self.vara.hf);
+        save_vara_endpoint(&mut ini, "vara_fm", &self.vara.fm);
 
         ini.write(path).map_err(|e| ConfigError::Parse(e.to_string()))?;
         Ok(())
@@ -551,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_transport_and_vara_sections() {
+    fn loads_transport_and_split_vara_sections() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("t.ini");
         std::fs::write(
@@ -560,12 +610,18 @@ mod tests {
 [transport]
 default = vara_fm
 
-[vara]
+[vara_hf]
 cmd_host = 10.0.0.5
 cmd_port = 8300
 data_host = 10.0.0.5
 data_port = 8301
-mode = fm
+bandwidth = bw2300
+
+[vara_fm]
+cmd_host = 10.0.0.6
+cmd_port = 8400
+data_host = 10.0.0.6
+data_port = 8401
 bandwidth = vwide
 "#,
         )
@@ -574,26 +630,29 @@ bandwidth = vwide
         let cfg = FileConfig::load(&p).unwrap();
 
         assert_eq!(cfg.transport.default, crate::transport::TransportKind::VaraFm);
-        assert_eq!(cfg.vara.cmd_host, "10.0.0.5");
-        assert_eq!(cfg.vara.cmd_port, 8300);
-        assert_eq!(cfg.vara.data_port, 8301);
-        assert_eq!(cfg.vara.mode, crate::transport::VaraMode::Fm);
-        assert_eq!(cfg.vara.bandwidth, crate::transport::VaraBandwidth::VWide);
+        assert_eq!(cfg.vara.hf.cmd_host, "10.0.0.5");
+        assert_eq!(cfg.vara.hf.cmd_port, 8300);
+        assert_eq!(cfg.vara.hf.bandwidth, crate::transport::VaraBandwidth::Bw2300);
+        assert_eq!(cfg.vara.fm.cmd_host, "10.0.0.6");
+        assert_eq!(cfg.vara.fm.cmd_port, 8400);
+        assert_eq!(cfg.vara.fm.data_port, 8401);
+        assert_eq!(cfg.vara.fm.bandwidth, crate::transport::VaraBandwidth::VWide);
     }
 
     #[test]
-    fn missing_transport_section_defaults_to_ax25() {
+    fn missing_transport_section_defaults_to_ax25_with_default_vara_endpoints() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("t.ini");
         std::fs::write(&p, "").unwrap();
         let cfg = FileConfig::load(&p).unwrap();
         assert_eq!(cfg.transport.default, crate::transport::TransportKind::Ax25);
-        assert_eq!(cfg.vara.cmd_port, 8300);
+        assert_eq!(cfg.vara.hf.cmd_port, 8300);
+        assert_eq!(cfg.vara.fm.cmd_port, 8400);
     }
 
     #[test]
-    fn test_config_save_load_roundtrip_preserves_transport_and_vara() {
-        use crate::transport::{TransportKind, VaraBandwidth, VaraMode};
+    fn test_config_save_load_roundtrip_preserves_split_vara() {
+        use crate::transport::{TransportKind, VaraBandwidth};
 
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.ini");
@@ -609,24 +668,34 @@ bandwidth = vwide
             connection: ConnectionConfig::default(),
             transport: TransportSection { default: TransportKind::VaraFm },
             vara: VaraSection {
-                cmd_host: "10.1.2.3".to_string(),
-                cmd_port: 8305,
-                data_host: "10.1.2.3".to_string(),
-                data_port: 8306,
-                mode: VaraMode::Hf,
-                bandwidth: VaraBandwidth::Bw500,
+                hf: VaraEndpoint {
+                    cmd_host: "10.1.2.3".to_string(),
+                    cmd_port: 8305,
+                    data_host: "10.1.2.3".to_string(),
+                    data_port: 8306,
+                    bandwidth: VaraBandwidth::Bw2300,
+                },
+                fm: VaraEndpoint {
+                    cmd_host: "10.4.5.6".to_string(),
+                    cmd_port: 8410,
+                    data_host: "10.4.5.6".to_string(),
+                    data_port: 8411,
+                    bandwidth: VaraBandwidth::VNarrow,
+                },
             },
         };
 
         cfg.save(&path).unwrap();
         let loaded = FileConfig::load(&path).unwrap();
 
-        assert_eq!(loaded.transport.default, TransportKind::VaraFm, "transport.default not roundtripped");
-        assert_eq!(loaded.vara.cmd_host, "10.1.2.3", "vara.cmd_host not roundtripped");
-        assert_eq!(loaded.vara.cmd_port, 8305, "vara.cmd_port not roundtripped");
-        assert_eq!(loaded.vara.data_host, "10.1.2.3", "vara.data_host not roundtripped");
-        assert_eq!(loaded.vara.data_port, 8306, "vara.data_port not roundtripped");
-        assert_eq!(loaded.vara.mode, VaraMode::Hf, "vara.mode not roundtripped");
-        assert_eq!(loaded.vara.bandwidth, VaraBandwidth::Bw500, "vara.bandwidth not roundtripped");
+        assert_eq!(loaded.transport.default, TransportKind::VaraFm);
+        assert_eq!(loaded.vara.hf.cmd_host, "10.1.2.3");
+        assert_eq!(loaded.vara.hf.cmd_port, 8305);
+        assert_eq!(loaded.vara.hf.data_port, 8306);
+        assert_eq!(loaded.vara.hf.bandwidth, VaraBandwidth::Bw2300);
+        assert_eq!(loaded.vara.fm.cmd_host, "10.4.5.6");
+        assert_eq!(loaded.vara.fm.cmd_port, 8410);
+        assert_eq!(loaded.vara.fm.data_port, 8411);
+        assert_eq!(loaded.vara.fm.bandwidth, VaraBandwidth::VNarrow);
     }
 }

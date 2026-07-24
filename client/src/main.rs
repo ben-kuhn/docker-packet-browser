@@ -65,6 +65,13 @@ async fn main() -> Result<(), ClientError> {
     if config.my_callsign.is_empty() {
         tracing::info!("No callsign configured; skipping modem auto-connect (configure via the web UI)");
     } else {
+        // Pick the right VARA endpoint (if any) up-front. AX.25 doesn't use
+        // VARA params, but we still populate them with the HF defaults so the
+        // TransportConfig struct stays fully-formed.
+        let (vara_ep, vara_mode) = match config.vara.for_transport(default_kind) {
+            Some((ep, mode)) => (ep.clone(), mode),
+            None => (config.vara.hf.clone(), transport::VaraMode::Hf),
+        };
         let modem_cfg = transport::TransportConfig {
             kind: default_kind,
             agwpe: transport::AgwpeParams {
@@ -72,12 +79,12 @@ async fn main() -> Result<(), ClientError> {
                 port: config.agwpe_port,
             },
             vara: transport::VaraParams {
-                cmd_host: config.vara.cmd_host.clone(),
-                cmd_port: config.vara.cmd_port,
-                data_host: config.vara.data_host.clone(),
-                data_port: config.vara.data_port,
-                mode: config.vara.mode,
-                bandwidth: config.vara.bandwidth,
+                cmd_host: vara_ep.cmd_host.clone(),
+                cmd_port: vara_ep.cmd_port,
+                data_host: vara_ep.data_host.clone(),
+                data_port: vara_ep.data_port,
+                mode: vara_mode,
+                bandwidth: vara_ep.bandwidth,
             },
             local_callsign: config.my_callsign.clone(),
         };
@@ -86,9 +93,13 @@ async fn main() -> Result<(), ClientError> {
                 "AGWPE",
                 format!("{}:{}", config.agwpe_host, config.agwpe_port),
             ),
-            transport::TransportKind::VaraFm | transport::TransportKind::VaraHf => (
-                "VARA",
-                format!("{}:{}", config.vara.cmd_host, config.vara.cmd_port),
+            transport::TransportKind::VaraHf => (
+                "VARA HF / Mercury",
+                format!("{}:{}", vara_ep.cmd_host, vara_ep.cmd_port),
+            ),
+            transport::TransportKind::VaraFm => (
+                "VARA FM",
+                format!("{}:{}", vara_ep.cmd_host, vara_ep.cmd_port),
             ),
         };
         tracing::info!("Attempting auto-connect to {} at {}", label, endpoint);
