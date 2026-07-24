@@ -15,7 +15,7 @@ use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
-use tokio::sync::{broadcast, Mutex as TokioMutex};
+use tokio::sync::{broadcast, Mutex as TokioMutex, Notify};
 use crate::cache::Cache;
 
 static CALLSIGN_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -39,6 +39,10 @@ pub struct AppContext {
     pub cache: Option<Arc<Cache>>,
     pub cache_max_ttl: Duration,
     pub config: FileConfig,
+    /// Web-triggered shutdown request. `POST /api/shutdown` calls
+    /// `notify_waiters()`; the main-loop shutdown coordinator awaits it
+    /// alongside SIGINT/SIGTERM.
+    pub shutdown: Arc<Notify>,
 }
 
 /// A whitelist of hostnames we are prepared to serve on. Used to block DNS
@@ -148,6 +152,7 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/api/config", get(api_config_get))
         .route("/api/config", post(api_config_post))
         .route("/api/vara-test", post(api_vara_test))
+        .route("/api/shutdown", post(api_shutdown))
         .route("/api/state", get(api_state_get))
         .route("/api/cache/clear", post(api_cache_clear))
         .route("/api/cache/delete", post(api_cache_delete))
@@ -1212,6 +1217,22 @@ async fn api_vara_test(
             error: Some(format!("{}", e)),
         }),
     }
+}
+
+#[derive(Serialize)]
+struct ShutdownResponse {
+    ok: bool,
+}
+
+/// Trigger a graceful shutdown of the whole process. Wakes up the main-loop
+/// shutdown coordinator, which stops accepting new HTTP requests, tears down
+/// the modem, and exits.
+async fn api_shutdown(
+    Extension(ctx): Extension<Arc<AppContext>>,
+) -> Json<ShutdownResponse> {
+    tracing::info!("Shutdown requested via web UI");
+    ctx.shutdown.notify_waiters();
+    Json(ShutdownResponse { ok: true })
 }
 
 #[derive(Serialize)]

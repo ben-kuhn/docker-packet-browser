@@ -682,6 +682,7 @@ The client opens the default browser to `http://localhost:8088/connect` on start
 - VARA host/port + default mode and bandwidth (used for both VARA HF/Mercury and VARA FM)
 - "Test AGWPE Connection", "Test VARA / Mercury Connection", and "Test VARA FM Connection" buttons
 - Save configuration to file
+- Shutdown button — cleanly disconnects the modem and stops the local proxy
 
 **Browse Page** (`/browse?url=...`):
 - Displays fetched pages with rewritten links
@@ -699,6 +700,15 @@ The client opens the default browser to `http://localhost:8088/connect` on start
 7. The client automatically performs the BPQ handshake
 8. Enter a URL in the address bar or click links
 9. Pages are fetched over the radio link and displayed
+
+#### Shutting Down
+
+There are three ways to stop the client, all of them clean — the modem
+is disconnected before the process exits:
+
+- Click **Shutdown Server** on the Configuration page.
+- Press **Ctrl+C** in the terminal. A second Ctrl+C forces an immediate exit.
+- Send **SIGTERM** (e.g. `systemctl stop`, `docker stop`).
 
 ### Running as a Service
 

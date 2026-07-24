@@ -10,7 +10,7 @@ use state::create_shared_state;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Notify};
 
 #[derive(Error, Debug)]
 pub enum ClientError {
@@ -139,6 +139,8 @@ async fn main() -> Result<(), ClientError> {
         None
     };
 
+    let shutdown = Arc::new(Notify::new());
+
     let ctx = Arc::new(AppContext {
         state: shared_state,
         agwpe: tokio::sync::Mutex::new(agwpe_manager),
@@ -147,9 +149,10 @@ async fn main() -> Result<(), ClientError> {
         cache,
         cache_max_ttl,
         config: config.clone(),
+        shutdown: shutdown.clone(),
     });
 
-    let app = proxy::create_router(ctx);
+    let app = proxy::create_router(ctx.clone());
 
     print_startup_banner(&listen_addr, bound.as_ref());
 
@@ -170,11 +173,86 @@ async fn main() -> Result<(), ClientError> {
         }
     }
 
+    // Install signal handlers eagerly (before axum::serve) so that a SIGTERM
+    // arriving in the tiny window before the coordinator task first polls
+    // cannot fall through to the default action and kill us ungracefully.
+    #[cfg(unix)]
+    let signal_streams = {
+        use tokio::signal::unix::{signal, SignalKind};
+        (signal(SignalKind::interrupt())?, signal(SignalKind::terminate())?)
+    };
+
+    // Coordinator: wake up axum on the first shutdown signal (SIGINT, SIGTERM,
+    // or web UI), then arm a second-Ctrl+C force-exit trap so a hung modem
+    // teardown can't leave the user stuck at the terminal.
+    #[cfg(unix)]
+    tokio::spawn(coordinate_shutdown(shutdown.clone(), signal_streams.0, signal_streams.1));
+    #[cfg(not(unix))]
+    tokio::spawn(coordinate_shutdown(shutdown.clone()));
+
+    let axum_shutdown = shutdown.clone();
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move { axum_shutdown.notified().await; })
         .await?;
 
+    // HTTP is closed; hang up on the modem cleanly (best-effort, bounded time
+    // so a wedged modem can't block us from exiting).
+    let manager = ctx.agwpe.lock().await.clone();
+    println!("Closing modem connection...");
+    match tokio::time::timeout(Duration::from_secs(2), manager.disconnect_modem()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!("Modem disconnect returned error: {}", e),
+        Err(_) => tracing::warn!("Modem disconnect timed out"),
+    }
+
+    println!("Goodbye.");
     Ok(())
+}
+
+/// Wait for a shutdown request (SIGINT / SIGTERM / web UI), notify the axum
+/// graceful-shutdown future, then watch for a second Ctrl+C that force-exits.
+#[cfg(unix)]
+async fn coordinate_shutdown(
+    shutdown: Arc<Notify>,
+    mut sigint: tokio::signal::unix::Signal,
+    mut sigterm: tokio::signal::unix::Signal,
+) {
+    tokio::select! {
+        _ = sigint.recv() => {
+            println!("\nReceived Ctrl+C. Shutting down (press Ctrl+C again to force exit)...");
+        }
+        _ = sigterm.recv() => {
+            println!("\nReceived SIGTERM. Shutting down...");
+        }
+        _ = shutdown.notified() => {
+            println!("Shutdown requested from the web UI. Shutting down...");
+        }
+    }
+    shutdown.notify_waiters();
+
+    // Any subsequent Ctrl+C forces an exit — the user is stuck at the
+    // terminal and clearly wants out.
+    if sigint.recv().await.is_some() {
+        eprintln!("Forcing exit.");
+        std::process::exit(130);
+    }
+}
+
+#[cfg(not(unix))]
+async fn coordinate_shutdown(shutdown: Arc<Notify>) {
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nReceived Ctrl+C. Shutting down (press Ctrl+C again to force exit)...");
+        }
+        _ = shutdown.notified() => {
+            println!("Shutdown requested from the web UI. Shutting down...");
+        }
+    }
+    shutdown.notify_waiters();
+    if tokio::signal::ctrl_c().await.is_ok() {
+        eprintln!("Forcing exit.");
+        std::process::exit(130);
+    }
 }
 
 /// Build a browser-usable URL for the connect page. A non-loopback wildcard
@@ -238,9 +316,3 @@ fn print_startup_banner(listen_addr: &str, bound: Option<&std::net::SocketAddr>)
     println!();
 }
 
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to install Ctrl+C handler");
-    tracing::info!("Shutting down...");
-}

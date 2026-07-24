@@ -1,6 +1,6 @@
 [package]
 name = "packet-browser-client"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 description = "Packet radio web browser client - AX.25/VARA/Mercury modem interface and local web proxy"
 license = "GPL-3.0"

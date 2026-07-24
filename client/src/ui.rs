@@ -763,6 +763,14 @@ pub fn configuration_page(
         </div>
     </div>
 
+    <div class="card">
+        <h2>Server</h2>
+        <p><small>Cleanly disconnect the modem and stop the local proxy. You'll need to relaunch the client to browse again.</small></p>
+        <div class="btn-row">
+            <button class="danger" onclick="shutdownServer()">Shutdown Server</button>
+        </div>
+    </div>
+
     <script>
         function showMsg(text, isError) {{
             const area = document.getElementById('msg-area');
@@ -861,6 +869,20 @@ pub fn configuration_page(
                 }}
             }} catch (e) {{
                 showMsg('Error: ' + e.message, true);
+            }}
+        }}
+
+        async function shutdownServer() {{
+            if (!confirm('Shut down the packet-browser client? You will need to relaunch it to browse again.')) return;
+            try {{
+                await fetch('/api/shutdown', {{ method: 'POST' }});
+                document.body.innerHTML =
+                    '<div style="max-width:600px;margin:6em auto;padding:2em;text-align:center;font-family:sans-serif;">' +
+                    '<h1>Server shutting down</h1>' +
+                    '<p>You can close this tab.</p>' +
+                    '</div>';
+            }} catch (e) {{
+                showMsg('Shutdown request failed: ' + e.message, true);
             }}
         }}
 

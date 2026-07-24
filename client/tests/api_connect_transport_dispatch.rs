@@ -50,6 +50,7 @@ fn make_ctx() -> Arc<AppContext> {
         cache: None,
         cache_max_ttl: std::time::Duration::from_secs(86_400),
         config,
+        shutdown: Arc::new(tokio::sync::Notify::new()),
     })
 }
 
