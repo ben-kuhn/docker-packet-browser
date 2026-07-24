@@ -593,7 +593,7 @@ pub(crate) async fn handle_reconnect(
             .await
             .map_err(transport_err_to_agwpe)?;
 
-        // reopen_modem_connection flips state to AgwpeConnected on success;
+        // reopen_modem_connection flips state to ModemConnected on success;
         // put us back in Reconnecting so the UI doesn't flicker while we drive
         // the rest of the handshake.
         set_state(

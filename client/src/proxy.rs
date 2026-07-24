@@ -147,6 +147,7 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/api/consent", post(api_consent_post))
         .route("/api/config", get(api_config_get))
         .route("/api/config", post(api_config_post))
+        .route("/api/vara-test", post(api_vara_test))
         .route("/api/state", get(api_state_get))
         .route("/api/cache/clear", post(api_cache_clear))
         .route("/api/cache/delete", post(api_cache_delete))
@@ -239,7 +240,7 @@ async fn connect_page_handler(
     let connection_state = state.connection_state.to_string();
     let connection_state_class = match state.connection_state {
         ConnectionState::Disconnected => "status-disconnected",
-        ConnectionState::AgwpeConnected => "status-agwpe-connected",
+        ConnectionState::ModemConnected => "status-modem-connected",
         ConnectionState::Connecting => "status-connecting",
         ConnectionState::AwaitingConsent { .. } => "status-connecting",
         ConnectionState::Connected => "status-connected",
@@ -289,6 +290,14 @@ async fn configuration_page_handler(
     let target_callsign = state.config.target_callsign.clone();
     let bpq_command = state.config.bpq_command.clone();
     let skip_bpq_app = state.config.skip_bpq_app;
+    let vara = crate::transport::VaraParams {
+        cmd_host: state.config.vara.cmd_host.clone(),
+        cmd_port: state.config.vara.cmd_port,
+        data_host: state.config.vara.data_host.clone(),
+        data_port: state.config.vara.data_port,
+        mode: state.config.vara.mode,
+        bandwidth: state.config.vara.bandwidth,
+    };
     drop(state);
 
     Html(ui::configuration_page(
@@ -298,6 +307,7 @@ async fn configuration_page_handler(
         &target_callsign,
         &bpq_command,
         skip_bpq_app,
+        &vara,
     ))
 }
 
@@ -991,6 +1001,12 @@ struct ConfigResponse {
     target_callsign: String,
     bpq_command: String,
     skip_bpq_app: bool,
+    vara_cmd_host: String,
+    vara_cmd_port: u16,
+    vara_data_host: String,
+    vara_data_port: u16,
+    vara_mode: String,
+    vara_bandwidth: String,
 }
 
 async fn api_config_get(
@@ -1004,6 +1020,12 @@ async fn api_config_get(
         target_callsign: state.config.target_callsign.clone(),
         bpq_command: state.config.bpq_command.clone(),
         skip_bpq_app: state.config.skip_bpq_app,
+        vara_cmd_host: state.config.vara.cmd_host.clone(),
+        vara_cmd_port: state.config.vara.cmd_port,
+        vara_data_host: state.config.vara.data_host.clone(),
+        vara_data_port: state.config.vara.data_port,
+        vara_mode: state.config.vara.mode.to_string(),
+        vara_bandwidth: state.config.vara.bandwidth.to_string(),
     })
 }
 
@@ -1015,6 +1037,12 @@ struct ConfigUpdate {
     target_callsign: Option<String>,
     bpq_command: Option<String>,
     skip_bpq_app: Option<bool>,
+    vara_cmd_host: Option<String>,
+    vara_cmd_port: Option<u16>,
+    vara_data_host: Option<String>,
+    vara_data_port: Option<u16>,
+    vara_mode: Option<String>,
+    vara_bandwidth: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1060,6 +1088,34 @@ async fn api_config_post(
     if let Some(skip) = update.skip_bpq_app {
         config.skip_bpq_app = skip;
     }
+    if let Some(h) = update.vara_cmd_host {
+        config.vara.cmd_host = h;
+    }
+    if let Some(p) = update.vara_cmd_port {
+        config.vara.cmd_port = p;
+    }
+    if let Some(h) = update.vara_data_host {
+        config.vara.data_host = h;
+    }
+    if let Some(p) = update.vara_data_port {
+        config.vara.data_port = p;
+    }
+    if let Some(m) = update.vara_mode {
+        config.vara.mode = match m.as_str() {
+            "hf" => crate::transport::VaraMode::Hf,
+            _ => crate::transport::VaraMode::Fm,
+        };
+    }
+    if let Some(b) = update.vara_bandwidth {
+        config.vara.bandwidth = match b.as_str() {
+            "vnarrow" => crate::transport::VaraBandwidth::VNarrow,
+            "bw250"   => crate::transport::VaraBandwidth::Bw250,
+            "bw500"   => crate::transport::VaraBandwidth::Bw500,
+            "bw2300"  => crate::transport::VaraBandwidth::Bw2300,
+            "bw2750"  => crate::transport::VaraBandwidth::Bw2750,
+            _         => crate::transport::VaraBandwidth::VWide,
+        };
+    }
 
     match config.save(&path) {
         Ok(()) => {
@@ -1075,6 +1131,85 @@ async fn api_config_post(
         Err(e) => Json(ConfigSaveResponse {
             ok: false,
             error: Some(format!("Failed to save config: {}", e)),
+        }),
+    }
+}
+
+#[derive(Deserialize)]
+struct VaraTestRequest {
+    mode: Option<String>,
+}
+
+#[derive(Serialize)]
+struct VaraTestResponse {
+    ok: bool,
+    error: Option<String>,
+}
+
+/// Probe the configured VARA modem by opening a short-lived TransportManager,
+/// running connect_modem, and immediately disconnecting. Used by the "Test
+/// VARA / Mercury" and "Test VARA FM" buttons on the configuration page.
+async fn api_vara_test(
+    Extension(ctx): Extension<Arc<AppContext>>,
+    Json(req): Json<VaraTestRequest>,
+) -> Json<VaraTestResponse> {
+    use crate::transport::{TransportConfig, TransportKind, VaraBandwidth, VaraMode};
+
+    let (mode, kind, default_bw) = match req.mode.as_deref() {
+        Some("fm") => (VaraMode::Fm, TransportKind::VaraFm, VaraBandwidth::VWide),
+        _          => (VaraMode::Hf, TransportKind::VaraHf, VaraBandwidth::Bw500),
+    };
+
+    let (cfg, response_timeout_secs) = {
+        let s = ctx.state.lock_or_poisoned();
+        // Fall back to a mode-appropriate default if the stored bandwidth
+        // doesn't match the requested mode (e.g. configured Bw2300 but the
+        // user pressed the "Test VARA FM" button).
+        let stored_bw = s.config.vara.bandwidth;
+        let bandwidth = match (mode, stored_bw) {
+            (VaraMode::Fm, VaraBandwidth::VNarrow) | (VaraMode::Fm, VaraBandwidth::VWide) => stored_bw,
+            (VaraMode::Hf, VaraBandwidth::Bw250)
+            | (VaraMode::Hf, VaraBandwidth::Bw500)
+            | (VaraMode::Hf, VaraBandwidth::Bw2300)
+            | (VaraMode::Hf, VaraBandwidth::Bw2750) => stored_bw,
+            _ => default_bw,
+        };
+        let cfg = TransportConfig {
+            kind,
+            agwpe: crate::transport::AgwpeParams {
+                host: s.config.agwpe_host.clone(),
+                port: s.config.agwpe_port,
+            },
+            vara: crate::transport::VaraParams {
+                cmd_host: s.config.vara.cmd_host.clone(),
+                cmd_port: s.config.vara.cmd_port,
+                data_host: s.config.vara.data_host.clone(),
+                data_port: s.config.vara.data_port,
+                mode,
+                bandwidth,
+            },
+            local_callsign: s.config.my_callsign.clone(),
+        };
+        (cfg, s.config.connection.response_timeout_secs)
+    };
+
+    let vara_transport: Box<dyn crate::transport::Transport> =
+        Box::new(crate::transport::vara::VaraTransport::new());
+    let manager = TransportManager::spawn(
+        vara_transport,
+        ctx.state.clone(),
+        ctx.log_tx.clone(),
+        response_timeout_secs,
+    );
+
+    match manager.connect_modem(cfg).await {
+        Ok(()) => {
+            let _ = manager.disconnect_modem().await;
+            Json(VaraTestResponse { ok: true, error: None })
+        }
+        Err(e) => Json(VaraTestResponse {
+            ok: false,
+            error: Some(format!("{}", e)),
         }),
     }
 }

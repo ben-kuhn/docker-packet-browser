@@ -23,7 +23,7 @@ impl<'a, T> LockExt<'a, T> for Mutex<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectionState {
     Disconnected,
-    AgwpeConnected,
+    ModemConnected,
     Connecting,
     /// BPQ handshake reached the "type AGREE to proceed" prompt and is
     /// waiting for the operator to acknowledge in the UI. The variant holds
@@ -39,7 +39,7 @@ impl std::fmt::Display for ConnectionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConnectionState::Disconnected => write!(f, "Disconnected"),
-            ConnectionState::AgwpeConnected => write!(f, "AGWPE Connected"),
+            ConnectionState::ModemConnected => write!(f, "Modem Connected"),
             ConnectionState::Connecting => write!(f, "Connecting"),
             // Fixed string only — the disclaimer body is fetched via
             // /api/consent, not through the state Display used for log lines.
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_connection_state_display() {
         assert_eq!(ConnectionState::Disconnected.to_string(), "Disconnected");
-        assert_eq!(ConnectionState::AgwpeConnected.to_string(), "AGWPE Connected");
+        assert_eq!(ConnectionState::ModemConnected.to_string(), "Modem Connected");
         assert_eq!(ConnectionState::Connecting.to_string(), "Connecting");
         assert_eq!(ConnectionState::Connected.to_string(), "Connected");
         assert_eq!(

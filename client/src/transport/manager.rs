@@ -400,7 +400,7 @@ async fn handle_close_session(
 
     match transport.close_session().await {
         Ok(()) => {
-            set_state(state, log_tx, ConnectionState::AgwpeConnected);
+            set_state(state, log_tx, ConnectionState::ModemConnected);
             Ok(())
         }
         Err(e) => Err(transport_err_to_agwpe(e)),

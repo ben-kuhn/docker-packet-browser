@@ -170,14 +170,14 @@ SKIP_BPQ_APP=true TARGET_CALLSIGN=NODE-7 ./demo.sh
 
 ### Testing in Demo Mode
 
-1. Open the client web UI in your browser (URL shown in demo output)
-2. The client automatically connects to AGWPE on startup
-3. Click "AX.25 Connect" to establish connection to the BPQ node
+1. The client opens the default browser to `/connect` on startup (suppress with `--dont-launch-browser`)
+2. The client attempts to auto-connect to the configured modem (AGWPE for AX.25; VARA for VARA FM/HF)
+3. Click "Connect to Node" to establish the AX.25 link to the BPQ node
 4. Browse to any URL - it will be fetched through the virtual radio link!
 
-If the auto-connect fails, check that:
-- Your AGWPE modem/server is running
-- The configuration in the Configuration tab is correct
+If the auto-connect fails, the app still starts — you can adjust settings and (re)connect from the web UI. Check that:
+- Your modem (AGWPE or VARA) is running
+- The Configuration tab has the right host/port for the transport you want to use
 
 ### Troubleshooting
 
@@ -193,7 +193,7 @@ For VARA/Mercury manual testing, see `demo-vara.sh` — it prints the expected t
 Mercury/LinBPQ prerequisites:
   - Start Mercury on both ends
   - Configure LinBPQ on the server side with a VARA port pointing at Mercury's cmd/data ports
-  - Open the client web UI `/connect` page and select "VARA HF" transport
+  - Open the client web UI `/connect` page and select "VARA HF / Mercury" transport
   - Use the Mercury ports displayed in the script output
 
 ---
@@ -637,13 +637,16 @@ bpq_command = WEB
 packet-browser-client [OPTIONS]
 
 Options:
-  -c, --config <PATH>        Configuration file (INI format)
-      --agwpe-host <HOST>    AGWPE host (overrides config file)
-      --agwpe-port <PORT>    AGWPE port (overrides config file)
-      --listen-addr <ADDR>   Web proxy listen address [default: 127.0.0.1:8088]
-      --bpq-command <CMD>    BPQ APPLICATION command [default: WEB]
-  -v, --verbose...           Increase verbosity (-v, -vv, -vvv)
-  -h, --help                 Print help
+  -c, --config <PATH>            Configuration file (INI format)
+      --agwpe-host <HOST>        AGWPE host (overrides config file)
+      --agwpe-port <PORT>        AGWPE port (overrides config file)
+      --listen-addr <ADDR>       Web proxy listen address [default: 127.0.0.1:8088]
+      --bpq-command <CMD>        BPQ APPLICATION command [default: WEB]
+      --allowed-hosts <HOSTS>    Extra hostnames to accept in the Host header (comma-separated)
+      --dont-launch-browser      Don't open the default web browser to /connect on startup
+  -v, --verbose...               Increase verbosity (-v, -vv, -vvv)
+  -V, --version                  Print version
+  -h, --help                     Print help
 ```
 
 ### Using the Client
@@ -663,17 +666,21 @@ packet-browser-client --config /path/to/config.ini
 
 #### Web Interface
 
-Open your browser to `http://localhost:8088` (or your configured listen address).
+The client opens the default browser to `http://localhost:8088/connect` on startup (suppress with `--dont-launch-browser`).
 
 **Connect Page** (`/connect`):
-- AGWPE connection status
-- Callsign configuration
-- Port selection (queries AGWPE for available ports)
-- AX.25 connect/disconnect buttons
+- Modem connection status
+- Transport selection: AX.25 (AGWPE), VARA FM, VARA HF / Mercury
+- Callsign + target callsign
+- Port selection (for AGWPE, queries the modem for available ports)
+- "Connect to Modem" / "Connect to Node" / Disconnect buttons
 - Live debug log with SSE updates
 
 **Configuration Page** (`/configuration`):
-- AGWPE host/port settings
+- AGWPE host/port
+- Callsign and BPQ session settings
+- VARA host/port + default mode and bandwidth (used for both VARA HF/Mercury and VARA FM)
+- "Test AGWPE Connection", "Test VARA / Mercury Connection", and "Test VARA FM Connection" buttons
 - Save configuration to file
 
 **Browse Page** (`/browse?url=...`):
@@ -683,12 +690,12 @@ Open your browser to `http://localhost:8088` (or your configured listen address)
 
 #### Typical Workflow
 
-1. Start the client: `packet-browser-client`
-2. Open browser to `http://localhost:8088`
-3. On the Connect page, click "Connect to AGWPE"
-4. Select your AGWPE port from the dropdown
+1. Start the client: `packet-browser-client` (default browser opens to `/connect`)
+2. On the Connect page, pick the transport (AX.25 for AGWPE, VARA FM, or VARA HF / Mercury)
+3. Click "Connect to Modem"
+4. For AX.25: select the port from the dropdown
 5. Enter your callsign and target node callsign
-6. Click "AX.25 Connect"
+6. Click "Connect to Node"
 7. The client automatically performs the BPQ handshake
 8. Enter a URL in the address bar or click links
 9. Pages are fetched over the radio link and displayed
@@ -888,10 +895,10 @@ The script will:
 
 #### Testing in Demo Mode
 
-1. Open the client web UI in your browser
-2. Click "Connect to AGWPE" to connect to the virtual TNC
+1. Open the client web UI in your browser (auto-launched on startup unless `--dont-launch-browser`)
+2. Click "Connect to Modem" to connect to the virtual TNC
 3. Enter a target callsign (e.g., `N0CALL-7`)
-4. Click "AX.25 Connect"
+4. Click "Connect to Node"
 5. Browse to any URL - it will be fetched through the virtual radio link!
 
 #### Troubleshooting

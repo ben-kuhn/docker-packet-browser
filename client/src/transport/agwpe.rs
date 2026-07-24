@@ -363,7 +363,7 @@ impl AgwpeTransport {
     }
 
     /// Perform the AGWPE TCP connect + callsign registration.  On success the
-    /// modem is in `AgwpeConnected`; on failure `stream` is cleared.
+    /// modem is in `ModemConnected`; on failure `stream` is cleared.
     pub(crate) async fn connect_modem_internal(
         &mut self,
         host: &str,
@@ -428,7 +428,7 @@ impl AgwpeTransport {
                     DebugLogEntry::new(LogLevel::Debug, "AGWPE", "Registration successful")
                         .with_direction(Direction::Rx),
                 );
-                self.set_state(ConnectionState::AgwpeConnected);
+                self.set_state(ConnectionState::ModemConnected);
                 Ok(())
             }
             Ok(frame) => {

@@ -124,7 +124,7 @@ button.danger:hover { background: #ef4444; }
     font-weight: bold;
 }
 .status-disconnected { background: #450a0a; color: #ef4444; }
-.status-agwpe-connected { background: #052e16; color: #22c55e; }
+.status-modem-connected { background: #052e16; color: #22c55e; }
 .status-connecting { background: #422006; color: #fbbf24; }
 .status-reconnecting { background: #422006; color: #fbbf24; }
 .status-connected { background: #052e16; color: #22c55e; }
@@ -265,7 +265,7 @@ pub fn connect_page(
             <select id="transport" onchange="onTransportChange()">
                 <option value="ax25"{ax25_selected}>AX.25 (AGWPE)</option>
                 <option value="vara_fm"{vara_fm_selected}>VARA FM</option>
-                <option value="vara_hf"{vara_hf_selected}>VARA HF</option>
+                <option value="vara_hf"{vara_hf_selected}>VARA HF / Mercury</option>
             </select>
         </div>
 
@@ -309,9 +309,9 @@ pub fn connect_page(
         </div>
 
         <div class="btn-row">
-            <button id="btn-agwpe" onclick="connectAgwpe()">Connect to AGWPE</button>
-            <button id="btn-connect" class="primary" onclick="ax25Connect()" disabled>AX.25 Connect</button>
-            <button id="btn-disconnect" class="danger" onclick="ax25Disconnect()" disabled>Disconnect</button>
+            <button id="btn-modem" onclick="connectModem()">Connect to Modem</button>
+            <button id="btn-connect" class="primary" onclick="connectNode()" disabled>Connect to Node</button>
+            <button id="btn-disconnect" class="danger" onclick="disconnectNode()" disabled>Disconnect</button>
         </div>
     </div>
 
@@ -370,13 +370,13 @@ pub fn connect_page(
             badge.textContent = state;
             badge.className = 'status-badge status-' + state.toLowerCase().replace(/[^a-z]/g, '-');
 
-            const btnAgwpe = document.getElementById('btn-agwpe');
+            const btnModem = document.getElementById('btn-modem');
             const btnConnect = document.getElementById('btn-connect');
             const btnDisconnect = document.getElementById('btn-disconnect');
 
             const busy = (state === 'Connecting' || state === 'Awaiting consent');
-            btnAgwpe.disabled = (state === 'AGWPE Connected' || busy || state === 'Connected');
-            btnConnect.disabled = (state !== 'AGWPE Connected');
+            btnModem.disabled = (state === 'Modem Connected' || busy || state === 'Connected');
+            btnConnect.disabled = (state !== 'Modem Connected');
             btnDisconnect.disabled = (state !== 'Connected' && !busy);
 
             if (state === 'Awaiting consent') {{
@@ -438,8 +438,8 @@ pub fn connect_page(
             setTimeout(() => area.innerHTML = '', 5000);
         }}
 
-        async function connectAgwpe() {{
-            const btn = document.getElementById('btn-agwpe');
+        async function connectModem() {{
+            const btn = document.getElementById('btn-modem');
             btn.disabled = true;
             btn.textContent = 'Connecting...';
             try {{
@@ -449,23 +449,23 @@ pub fn connect_page(
                     ports = data.ports || [];
                     initPorts();
                     updateUI(data.state);
-                    showMsg('Connected to AGWPE');
+                    showMsg('Connected to modem');
                 }} else {{
                     updateUI(data.state || 'Error');
-                    showMsg(data.error || 'Failed to connect to AGWPE', true);
+                    showMsg(data.error || 'Failed to connect to modem', true);
                 }}
             }} catch (e) {{
                 showMsg('Error: ' + e.message, true);
                 updateUI('Error');
             }}
-            btn.textContent = 'Connect to AGWPE';
+            btn.textContent = 'Connect to Modem';
         }}
 
-        async function ax25Connect() {{
+        async function connectNode() {{
             const target = document.getElementById('target-call').value.trim();
             const portNum = document.getElementById('port-select').value;
             if (!target) {{ showMsg('Enter a target callsign', true); return; }}
-            if (portNum === '') {{ showMsg('Select an AGWPE port first', true); return; }}
+            if (portNum === '') {{ showMsg('Select a modem port first', true); return; }}
 
             const btn = document.getElementById('btn-connect');
             btn.disabled = true;
@@ -480,7 +480,7 @@ pub fn connect_page(
                 const data = await resp.json();
                 if (data.ok) {{
                     updateUI('Connected');
-                    showMsg('AX.25 connected to ' + target + '. Opening browser…');
+                    showMsg('Connected to ' + target + '. Opening browser…');
                     // Send the user straight to the browse UI so there's an
                     // obvious next step; the connect page has no other job
                     // once the link is up.
@@ -494,11 +494,11 @@ pub fn connect_page(
                 showMsg('Error: ' + e.message, true);
                 updateUI('Error');
             }}
-            btn.textContent = 'AX.25 Connect';
+            btn.textContent = 'Connect to Node';
             btn.disabled = false;
         }}
 
-        async function ax25Disconnect() {{
+        async function disconnectNode() {{
             try {{
                 const resp = await fetch('/api/disconnect', {{ method: 'POST' }});
                 const data = await resp.json();
@@ -626,7 +626,25 @@ pub fn configuration_page(
     target_callsign: &str,
     bpq_command: &str,
     skip_bpq_app: bool,
+    vara_params: &crate::transport::VaraParams,
 ) -> String {
+    use crate::transport::{VaraBandwidth, VaraMode};
+
+    let vara_cmd_host  = h(&vara_params.cmd_host);
+    let vara_cmd_port  = vara_params.cmd_port;
+    let vara_data_host = h(&vara_params.data_host);
+    let vara_data_port = vara_params.data_port;
+
+    let vara_mode_fm_sel = if vara_params.mode == VaraMode::Fm { " selected" } else { "" };
+    let vara_mode_hf_sel = if vara_params.mode == VaraMode::Hf { " selected" } else { "" };
+
+    let vara_bw_vnarrow_sel = if vara_params.bandwidth == VaraBandwidth::VNarrow { " selected" } else { "" };
+    let vara_bw_vwide_sel   = if vara_params.bandwidth == VaraBandwidth::VWide   { " selected" } else { "" };
+    let vara_bw_250_sel     = if vara_params.bandwidth == VaraBandwidth::Bw250   { " selected" } else { "" };
+    let vara_bw_500_sel     = if vara_params.bandwidth == VaraBandwidth::Bw500   { " selected" } else { "" };
+    let vara_bw_2300_sel    = if vara_params.bandwidth == VaraBandwidth::Bw2300  { " selected" } else { "" };
+    let vara_bw_2750_sel    = if vara_params.bandwidth == VaraBandwidth::Bw2750  { " selected" } else { "" };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -691,7 +709,57 @@ pub fn configuration_page(
 
         <div class="btn-row">
             <button class="primary" onclick="saveConfig()">Save Configuration</button>
-            <button onclick="testConnection()">Test AGWPE Connection</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>VARA Settings</h2>
+        <p><small>Applies to VARA HF / Mercury and VARA FM modems.</small></p>
+
+        <div class="form-group">
+            <label for="vara-cmd-host">VARA Command Host</label>
+            <input type="text" id="vara-cmd-host" value="{vara_cmd_host}" placeholder="127.0.0.1" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-cmd-port">VARA Command Port</label>
+            <input type="number" id="vara-cmd-port" value="{vara_cmd_port}" min="1" max="65535">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-data-host">VARA Data Host</label>
+            <input type="text" id="vara-data-host" value="{vara_data_host}" placeholder="127.0.0.1" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-data-port">VARA Data Port</label>
+            <input type="number" id="vara-data-port" value="{vara_data_port}" min="1" max="65535">
+        </div>
+
+        <div class="form-group">
+            <label for="vara-mode">Default Mode</label>
+            <select id="vara-mode">
+                <option value="fm"{vara_mode_fm_sel}>FM</option>
+                <option value="hf"{vara_mode_hf_sel}>HF (VARA HF / Mercury)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="vara-bandwidth">Default Bandwidth</label>
+            <select id="vara-bandwidth">
+                <option value="vnarrow"{vara_bw_vnarrow_sel}>VNarrow</option>
+                <option value="vwide"{vara_bw_vwide_sel}>VWide</option>
+                <option value="bw250"{vara_bw_250_sel}>BW250</option>
+                <option value="bw500"{vara_bw_500_sel}>BW500</option>
+                <option value="bw2300"{vara_bw_2300_sel}>BW2300</option>
+                <option value="bw2750"{vara_bw_2750_sel}>BW2750</option>
+            </select>
+        </div>
+
+        <div class="btn-row">
+            <button onclick="testAgwpe()">Test AGWPE Connection</button>
+            <button onclick="testVara('hf')">Test VARA / Mercury Connection</button>
+            <button onclick="testVara('fm')">Test VARA FM Connection</button>
         </div>
     </div>
 
@@ -717,6 +785,12 @@ pub fn configuration_page(
                 document.getElementById('target-callsign').value = data.target_callsign || '';
                 document.getElementById('bpq-command').value = data.bpq_command || 'WEB';
                 document.getElementById('skip-bpq-app').checked = data.skip_bpq_app || false;
+                document.getElementById('vara-cmd-host').value = data.vara_cmd_host || '127.0.0.1';
+                document.getElementById('vara-cmd-port').value = data.vara_cmd_port || 8300;
+                document.getElementById('vara-data-host').value = data.vara_data_host || '127.0.0.1';
+                document.getElementById('vara-data-port').value = data.vara_data_port || 8301;
+                if (data.vara_mode)      document.getElementById('vara-mode').value = data.vara_mode;
+                if (data.vara_bandwidth) document.getElementById('vara-bandwidth').value = data.vara_bandwidth;
                 updateBpqCommandVisibility();
             }} catch (e) {{
                 showMsg('Failed to load config: ' + e.message, true);
@@ -731,9 +805,20 @@ pub fn configuration_page(
             const bpqCommand = document.getElementById('bpq-command').value.trim();
             const skipBpqApp = document.getElementById('skip-bpq-app').checked;
 
+            const varaCmdHost  = document.getElementById('vara-cmd-host').value.trim();
+            const varaCmdPort  = parseInt(document.getElementById('vara-cmd-port').value);
+            const varaDataHost = document.getElementById('vara-data-host').value.trim();
+            const varaDataPort = parseInt(document.getElementById('vara-data-port').value);
+            const varaMode     = document.getElementById('vara-mode').value;
+            const varaBw       = document.getElementById('vara-bandwidth').value;
+
             if (!host) {{ showMsg('AGWPE Host is required', true); return; }}
             if (!port || port < 1 || port > 65535) {{ showMsg('Invalid AGWPE port', true); return; }}
             if (!myCallsign) {{ showMsg('My Callsign is required', true); return; }}
+            if (!varaCmdHost) {{ showMsg('VARA Command Host is required', true); return; }}
+            if (!varaCmdPort || varaCmdPort < 1 || varaCmdPort > 65535) {{ showMsg('Invalid VARA command port', true); return; }}
+            if (!varaDataHost) {{ showMsg('VARA Data Host is required', true); return; }}
+            if (!varaDataPort || varaDataPort < 1 || varaDataPort > 65535) {{ showMsg('Invalid VARA data port', true); return; }}
 
             try {{
                 const resp = await fetch('/api/config', {{
@@ -745,7 +830,13 @@ pub fn configuration_page(
                         my_callsign: myCallsign,
                         target_callsign: targetCallsign,
                         bpq_command: bpqCommand,
-                        skip_bpq_app: skipBpqApp
+                        skip_bpq_app: skipBpqApp,
+                        vara_cmd_host: varaCmdHost,
+                        vara_cmd_port: varaCmdPort,
+                        vara_data_host: varaDataHost,
+                        vara_data_port: varaDataPort,
+                        vara_mode: varaMode,
+                        vara_bandwidth: varaBw
                     }})
                 }});
                 const data = await resp.json();
@@ -759,7 +850,7 @@ pub fn configuration_page(
             }}
         }}
 
-        async function testConnection() {{
+        async function testAgwpe() {{
             try {{
                 const resp = await fetch('/api/agwpe-status', {{ method: 'POST' }});
                 const data = await resp.json();
@@ -767,6 +858,25 @@ pub fn configuration_page(
                     showMsg('AGWPE reachable. ' + (data.ports || []).length + ' port(s) found.');
                 }} else {{
                     showMsg(data.error || 'AGWPE unreachable', true);
+                }}
+            }} catch (e) {{
+                showMsg('Error: ' + e.message, true);
+            }}
+        }}
+
+        async function testVara(mode) {{
+            const label = mode === 'fm' ? 'VARA FM' : 'VARA / Mercury';
+            try {{
+                const resp = await fetch('/api/vara-test', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ mode: mode }})
+                }});
+                const data = await resp.json();
+                if (data.ok) {{
+                    showMsg(label + ' modem reachable.');
+                }} else {{
+                    showMsg(data.error || (label + ' unreachable'), true);
                 }}
             }} catch (e) {{
                 showMsg('Error: ' + e.message, true);
@@ -784,6 +894,18 @@ pub fn configuration_page(
         target_callsign = h(target_callsign),
         bpq_command = h(bpq_command),
         skip_checked = if skip_bpq_app { "checked" } else { "" },
+        vara_cmd_host = vara_cmd_host,
+        vara_cmd_port = vara_cmd_port,
+        vara_data_host = vara_data_host,
+        vara_data_port = vara_data_port,
+        vara_mode_fm_sel = vara_mode_fm_sel,
+        vara_mode_hf_sel = vara_mode_hf_sel,
+        vara_bw_vnarrow_sel = vara_bw_vnarrow_sel,
+        vara_bw_vwide_sel = vara_bw_vwide_sel,
+        vara_bw_250_sel = vara_bw_250_sel,
+        vara_bw_500_sel = vara_bw_500_sel,
+        vara_bw_2300_sel = vara_bw_2300_sel,
+        vara_bw_2750_sel = vara_bw_2750_sel,
     )
 }
 
