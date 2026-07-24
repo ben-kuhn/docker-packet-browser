@@ -313,6 +313,7 @@ pub struct CliArgs {
     pub bpq_command: Option<String>,
     pub verbosity: u8,
     pub allowed_hosts: Vec<String>,
+    pub dont_launch_browser: bool,
 }
 
 impl CliArgs {
@@ -322,6 +323,7 @@ impl CliArgs {
         #[derive(Parser)]
         #[command(name = "packet-browser-client")]
         #[command(about = "Packet radio web browser client")]
+        #[command(version)]
         struct Args {
             #[arg(short, long, help = "Configuration file (INI format)")]
             config: Option<PathBuf>,
@@ -332,7 +334,7 @@ impl CliArgs {
             #[arg(long, help = "AGWPE port (default: 8000)")]
             agwpe_port: Option<u16>,
 
-            #[arg(long, default_value = "127.0.0.1:8080", help = "Web proxy listen address")]
+            #[arg(long, default_value = "127.0.0.1:8088", help = "Web proxy listen address")]
             listen_addr: String,
 
             #[arg(long, default_value = "WEB", help = "BPQ APPLICATION command")]
@@ -347,6 +349,9 @@ impl CliArgs {
                 help = "Extra hostnames to accept in the Host header (comma-separated). Useful for mDNS names like 'raspberrypi.local' when binding to a LAN interface. Loopback and LAN IP literals are already accepted based on --listen-addr."
             )]
             allowed_hosts: Vec<String>,
+
+            #[arg(long, help = "Don't open the default web browser to the connect page on startup")]
+            dont_launch_browser: bool,
         }
 
         let args = Args::parse();
@@ -364,6 +369,7 @@ impl CliArgs {
                 .map(|s| s.trim().to_ascii_lowercase())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            dont_launch_browser: args.dont_launch_browser,
         }
     }
 
@@ -471,6 +477,7 @@ mod tests {
             bpq_command: Some("WEB".to_string()),
             verbosity: 0,
             allowed_hosts: vec![],
+            dont_launch_browser: true,
         };
 
         let resolved = cli.resolve_config().unwrap();

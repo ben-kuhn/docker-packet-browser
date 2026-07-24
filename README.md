@@ -20,7 +20,7 @@ All data crossing the air interface is public, unencrypted, and decodable with p
 │                                                                       │
 │  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐  │
 │  │   Browser     │───▶│  Client (proxy)   │───▶│  AGWPE / TNC     │  │
-│  │ localhost:8080│    │  Web UI + Proxy   │    │  (Direwolf, etc) │  │
+│  │ localhost:8088│    │  Web UI + Proxy   │    │  (Direwolf, etc) │  │
 │  └──────────────┘    └──────────────────┘    └──────────────────┘  │
 │                                                                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -46,7 +46,7 @@ All data crossing the air interface is public, unencrypted, and decodable with p
 4. **BPQ** connects to the **server** via TCP (port 63004)
 5. **Server** prompts for callsign, client sends it
 6. **Server** shows logging disclaimer, client waits for operator consent, then sends `AGREE`
-7. User opens browser to client's web UI (default `http://localhost:8080`)
+7. User opens browser to client's web UI (default `http://localhost:8088`)
 8. User enters a URL or clicks links
 9. **Client** sends a plain-text `GET <url>\n` (or `POST <url>\n<len_be><body>`) request over AX.25 to the **server**
 10. **Server** fetches page with headless Firefox, sanitizes HTML, brotli-compresses the result, then base64-encodes it inside a printable `RESP…` frame
@@ -160,7 +160,7 @@ SKIP_BPQ_APP=true TARGET_CALLSIGN=NODE-7 ./demo.sh
 ┌─────────────────────────────────────────────────────────────┐
 │  Your Machine (Demo Mode)                                    │
 │                                                               │
-│  Browser ──▶ Client:8080 ──▶ Direwolf-A ──┐                 │
+│  Browser ──▶ Client:8088 ──▶ Direwolf-A ──┐                 │
 │                                              │ (audio)       │
 │  Server:63004 ◀── LinBPQ ◀── Direwolf-B ───┘                 │
 │       │                                                       │
@@ -504,7 +504,7 @@ Using the overlay from [nix-ham-packages](https://github.com/ben-kuhn/nix-ham-pa
     agwpeHost = "127.0.0.1";
     agwpePort = 8000;
     bpqCommand = "WEB";
-    listenAddr = "127.0.0.1:8080";
+    listenAddr = "127.0.0.1:8088";
   };
 }
 ```
@@ -640,7 +640,7 @@ Options:
   -c, --config <PATH>        Configuration file (INI format)
       --agwpe-host <HOST>    AGWPE host (overrides config file)
       --agwpe-port <PORT>    AGWPE port (overrides config file)
-      --listen-addr <ADDR>   Web proxy listen address [default: 127.0.0.1:8080]
+      --listen-addr <ADDR>   Web proxy listen address [default: 127.0.0.1:8088]
       --bpq-command <CMD>    BPQ APPLICATION command [default: WEB]
   -v, --verbose...           Increase verbosity (-v, -vv, -vvv)
   -h, --help                 Print help
@@ -655,7 +655,7 @@ Options:
 packet-browser-client
 
 # Using command-line options
-packet-browser-client --agwpe-host 192.168.1.100 --agwpe-port 8000 --listen-addr 0.0.0.0:8080
+packet-browser-client --agwpe-host 192.168.1.100 --agwpe-port 8000 --listen-addr 0.0.0.0:8088
 
 # Using custom config file
 packet-browser-client --config /path/to/config.ini
@@ -663,7 +663,7 @@ packet-browser-client --config /path/to/config.ini
 
 #### Web Interface
 
-Open your browser to `http://localhost:8080` (or your configured listen address).
+Open your browser to `http://localhost:8088` (or your configured listen address).
 
 **Connect Page** (`/connect`):
 - AGWPE connection status
@@ -684,7 +684,7 @@ Open your browser to `http://localhost:8080` (or your configured listen address)
 #### Typical Workflow
 
 1. Start the client: `packet-browser-client`
-2. Open browser to `http://localhost:8080`
+2. Open browser to `http://localhost:8088`
 3. On the Connect page, click "Connect to AGWPE"
 4. Select your AGWPE port from the dropdown
 5. Enter your callsign and target node callsign
@@ -878,7 +878,7 @@ The script will:
 ┌─────────────────────────────────────────────────────────────┐
 │  Your Machine (Demo Mode)                                    │
 │                                                               │
-│  Browser ──▶ Client:8080 ──▶ Direwolf-A ──┐                 │
+│  Browser ──▶ Client:8088 ──▶ Direwolf-A ──┐                 │
 │                                              │ (audio)       │
 │  Server:63004 ◀── LinBPQ ◀── Direwolf-B ───┘                 │
 │       │                                                       │
