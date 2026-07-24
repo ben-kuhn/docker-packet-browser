@@ -2,7 +2,7 @@
 name = "packet-browser-client"
 version = "0.5.3"
 edition = "2021"
-description = "Packet radio web browser client - AGWPE interface and local web proxy"
+description = "Packet radio web browser client - AX.25/VARA/Mercury modem interface and local web proxy"
 license = "GPL-3.0"
 
 [lib]
